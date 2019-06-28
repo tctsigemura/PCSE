@@ -1,0 +1,66 @@
+「TaC-OS 組込み版」のドキュメント(v0.6.1) --- 情報電子総合演習資料 ---
+	 				  (dir.txt : 2013.05.23(2015.05.10改訂))
+ファイルの構成：以下は，配布物のディレクトリ・ファイル構成の説明である．
+   util/		C-- のサポートルーチン(基本的に全 C-- プログラムが使用)
+	GNUmakefile	util ディレクトリの gmake 用 Makefile
+	Makefile	util ディレクトリの make 用 Makefile
+	crt0.s		スタートアップルーチン、便利ルーチン(アセンブリ言語)
+	util.cmm	printf、便利ルーチン(C--言語)
+      *	util.h		crt0.s, util.cmm の外部インタフェース
+   kernel/              TaC-OS 本体
+	GNUmakefile	kernel ディレクトリの gmake 用 Makefile
+	Makefile	kernel ディレクトリの make 用 Makefile
+        proc.h		PCB やセマフォのデータ構造を定義
+	kernAsm.s	カーネルのアセンブリ言語部分(ディスパッチャ等)
+	kernAsm.h	kernAsm.s の外部インタフェース
+	kernMemory.cmm	メモリ管理(malloc, free システムコール)
+	kernMemory.h	kernMemory.cmm の外部インタフェース
+        usrInit.cmm	ユーザプロセスの登録と初期化(アプリにより変更)
+        usrInit.h	usrInit.cmm の外部インタフェース
+   	kernMain.cmm	カーネル本体(main関数を含む)
+      * kernel.h	カーネルが公開するシステムコール
+   vgaWin/		ディスプレイにウインドを定義し管理するモジュール
+	GNUmakefile	vgaWin ディレクトリの gmake 用 Makefile
+	Makefile	vgaWin ディレクトリの make 用 Makefile
+	vgaWin.cmm	VGA ディスプレイにウインドを作って管理するルーチン
+      * vgaWin.h	vgaWin.cmm の外部インタフェース
+
+以下はプロセスとして実装されている．(各ディレクトリの class.txt も参照)
+   fatFs/		FAT16 ファイルシステム・サーバプロセス
+	GNUmakefile	fatfs ディレクトリの gmake 用 Makefile
+	Makefile	fatfs ディレクトリの make 用 Makefile
+   	dirEnt.h	ディレクトリ情報(一部)を表現する構造体
+	hdd.cmm		ハードディスクドライバ(PIOモード)
+	hdd.h		hdd.cmm の外部インタフェース
+	blkFile.cmm	クラスタ単位で操作する簡単なファイル
+	blkFile.h	blkFile.cmm の外部インタフェース
+	fatSys.cmm	ファイル関連システムコールの処理ルーチン
+	fatSys.h	fatSys.cmm の外部インタフェース
+	fatFs.cmm	ファイルシステム・サーバプロセス・メインルーチン
+			(ユーザが呼出すシステムコールのスタブと，スタブと
+			 通信するサーバプロセスが含まれる．サーバプロセスは
+			 fatSys.cmm を使用してシステムコールを処理させる)
+      * fatFs.h		ファイルシステム・サーバプロセスが公開するサービス
+   playerProc/		MP3ファイル再生制御部とデータ転送プロセス
+			(MP3 デコーダ LSI の制御方法のサンプルも含む)
+	GNUmakefile	playerProc ディレクトリの gmake 用 Makefile
+	Makefile	playerProc ディレクトリの make 用 Makefile
+	mp3.cmm		MP3 デコーダ LSI のドライバ
+	mp3.h		mp3.cmm の外部インタフェース
+	player.cmm	再生制御部とデータ転送プロセス
+      * playerProc.h	player.cmm の外部インタフェース
+   kbdProc/		キーボードドライバとユーザプロセスのサンプル
+			(シェルもどき ls, cat, dump, play コマンドが実行できる)
+	GNUmakefile	kbdProc ディレクトリの gmake 用 Makefile
+	Makefile	kbdProc ディレクトリの make 用 Makefile
+	kbd.cmm		キーボードドライバ(スキャンコードを受信する)
+	kbd.h		kbd.cmm の外部インタフェース
+	scConv.cmm	スキャンコード=>文字列変換ルーチン
+	scConv.h	scConv.cmm の外部インタフェース
+	kbdMain.cmm	キーボード操作を使用するプロセスの例
+      * kbdProc.h	kbdMain.cmm の外部インタフェース
+   lifeProc/		ユーザプロセスのサンプル(ライフゲーム)
+	GNUmakefile	lifeProc ディレクトリの gmake 用 Makefile
+	Makefile	filfProc ディレクトリの make 用 Makefile
+	lifeMain.cmm	vgaWin と sleep を使用するプロセスの例
+      * lifeProc.h	lifeMain.cmm の外部インタフェース

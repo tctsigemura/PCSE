@@ -1,0 +1,218 @@
+/*
+ * vgaWin/vgaWin.cmm
+ *  VGA ディスプレイにウインドを作って管理する
+ */
+
+#include <util.h>
+#include <kernel.h>
+#include "vgaWin.h"
+
+// ディスプレイの広さ
+#define DX 80
+#define DY 25
+
+char[] vRam;
+
+// ウインドの位置とサイズの変更
+public void wSetProp(WIN w, int y0, int x0, int ys, int xs) {
+  w.org = y0*DX + x0;                               // データを初期化し
+  w.ys  = ys;
+  w.xs  = xs;
+  w.cy  = 0;
+  w.cx  = 0;
+  w.sc  = false;
+  w.cr  = false;
+}  
+
+// 新しいウインドを作る
+public WIN newWin(int y0, int x0, int ys, int xs) {
+  if (vRam==null) vRam=__ItoA(0xf000);              // VRAM アドレス
+
+  WIN w    = malloc(sizeof(WIN));
+  wSetProp(w, y0, x0, ys, xs);
+  return w;
+}
+
+// ウインド内部のスクロール
+void scroll(WIN w) {
+  int adr = w.org;
+  for (int y=0; y<w.ys-1; y=y+1) {
+    for (int x=0; x<w.xs; x=x+1)
+      vRam[adr+x] = vRam[adr+x+DX];
+    adr = adr + DX;
+  }
+  for (int x=0; x<w.xs; x=x+1)
+    vRam[adr+x] = ' ';
+  w.sc = false;
+}
+
+// 改行
+void newline(WIN w) {
+  if (w.sc) scroll(w);
+  w.cx = 0;
+  if ((w.cy = w.cy + 1) >= w.ys) {
+    w.cy = w.ys - 1;
+    w.sc = true;
+  }
+  w.cr = false;
+}
+
+// 表示可能な文字の場合
+void printable(WIN w, char c) {
+  if (w.cr) newline(w);
+  if (w.sc) scroll(w);
+
+  vRam[w.org + w.cy * DX + w.cx] = c;               // 画面に文字を表示する
+
+  if ((w.cx = w.cx + 1)>=w.xs) {                    // 行末に到達した
+    w.cx = w.xs - 1;
+    w.cr = true;
+  }
+}
+
+// TAB
+void tab(WIN w) {
+  int stop = (w.cx+8) & 0x0fff8;
+  for (int i=w.cx; i<stop; i=i+1)
+    printable(w, ' ');
+}
+
+// バックスペース
+void backspace(WIN w) {
+  if (w.cx==0 && w.cy==0) return;           // これ以上戻れない
+
+  w.cx = w.cx - 1;                          // カーソルを左に移動
+
+  if (w.cx < 0) {                           // 左端を突き抜けた
+    w.cx = w.xs - 1;                        // 前の行の右端に移動
+    w.cy = w.cy - 1;
+    w.sc = false;
+  }
+}
+
+// ウインドの中に１文字表示する
+public void wPutc(WIN w, char c) {
+  if (c=='\r') {                            // 復帰
+     w.cx = 0;
+  } else if (c=='\n') {                     // 改行(実は復帰もする)
+     newline(w);
+  } else if (c=='\t') {                     // TAB
+     tab(w);
+  } else if (c=='\x08') {                   // バックスペース('\b'はC--にない)
+     backspace(w);
+  } else if (0x0020 <= c && c <= 0x007e) {  // 表示可能な文字だけ
+     printable(w, c);
+  }
+}
+
+// 文字列出力
+public void wPuts(WIN w, char[] str) {
+  for (int i=0; str[i]!='\0'; i=i+1)
+    wPutc(w, str[i]);
+}
+
+// カーソルの移動
+public void wMove(WIN w, int y, int x) {
+  if (x<0)     x = 0;
+  if (x>=w.xs) x = w.xs - 1;
+  if (y<0)     y = 0;
+  if (y>=w.ys) y = w.ys - 1;
+
+  w.cx = x;
+  w.cy = y;
+  w.sc = false;
+  w.cr = false;
+}
+
+// ウインド内の表示を消去
+public void wClear(WIN w) {
+  int adr = w.org;
+  for (int y=0; y<w.ys; y=y+1) {
+    for (int x=0; x<w.xs; x=x+1)
+      vRam[adr+x] = ' ';
+    adr = adr + DX;
+  }
+}
+
+// printf の代用
+char[]  hstr = "0123456789abcdef";
+
+void putnum_sub(WIN win, int x, int n) {
+  if (x!=0) {
+    putnum_sub(win, x/win.putnum_b, n+1);
+    wPutc(win, hstr[x % win.putnum_b]);
+  } else {
+    if (win.putnum_m && win.putnum_p!=' ') wPutc(win, '-');
+    if (n==0) win.putnum_w = win.putnum_w - 1;
+    while (win.putnum_w>n) {
+      wPutc(win, win.putnum_p);
+      win.putnum_w = win.putnum_w - 1;
+    }
+    if (win.putnum_m && win.putnum_p==' ') wPutc(win, '-');
+    if (n==0) wPutc(win, '0');
+  }
+}
+    
+void uputnum(WIN win, int x, int w, char p, int base) {
+  win.putnum_b = base;
+  win.putnum_m = false;
+  win.putnum_w = w;
+  win.putnum_p = p;
+  putnum_sub(win, x, 0);
+}
+
+void sputnum(WIN win, int x, int w, char p, int base) {
+  win.putnum_b = base;
+  win.putnum_m = false;
+  if (x<0) {
+    x = -x;
+    win.putnum_m = true;
+    w = w - 1;
+  }
+  win.putnum_w = w;
+  win.putnum_p = p;
+  putnum_sub(win, x, 0);
+}
+
+public int wPrintf(WIN win, char[] fmt, ...) {
+  int[] args = __args();
+  int n=1;
+  int arg = args[n];
+  for (int i=0; fmt[i]!='\0'; i=i+1) {
+    char c = fmt[i];
+    if (c=='%') {
+      c = fmt[i=i+1];
+      int  p = ' ';
+      if (c=='0') p='0';
+      int  w = 0;
+      while ('0'<=c && c<='9') {
+        w = w * 10 + c - '0';
+	c = fmt[i=i+1];
+      }
+      if (c=='\0') {
+        return n;
+      } else if (c=='o') {
+        uputnum(win,arg,w,p,8);
+	arg = args[n=n+1];
+      } else if (c=='d') {
+        sputnum(win,arg,w,p,10);
+	arg = args[n=n+1];
+      } else if (c=='x') {
+        uputnum(win,arg,w,p,16);
+	arg = args[n=n+1];
+      } else if (c=='c') {
+        wPutc(win,arg);
+	arg = args[n=n+1];
+      } else if (c=='s') {
+        wPuts(win,__ItoA(arg));
+	arg = args[n=n+1];
+      } else if (c=='%') {
+        wPutc(win,'%');
+      } else {
+        wPutc(win,c);
+      }
+    } else 
+      wPutc(win,c);
+  }
+  return n;
+}

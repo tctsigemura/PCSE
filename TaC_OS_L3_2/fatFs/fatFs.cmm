@@ -1,0 +1,172 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ * fatFs/fatFS.cmm : FAT16 ファイルシステムサーバの本体
+ *
+ * 2012.07.30  v0.0.1   : fatFsMain で newSem を実行していた。(バグ)
+ *                        fatFsInit に移動
+ * 2011.05.23  v0.0.0   : boot.cmm を基に作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include <kernel.h>          // セマフォを使用するために必要
+
+#include "dirEnt.h"
+#include "blkFile.h"
+#include "fatSys.h"
+#include "fatFs.h"
+
+//-----------------------------------------------------------------------------
+// FAT16ファイルシステムの外部インタフェース部分
+//-----------------------------------------------------------------------------
+// システムコールパラメータ
+struct FSYSP {
+  int  op;
+  int  prm1;
+  int  prm2;
+  int  prm3;
+};
+
+// システムコールの種類
+#define SYSOPEN     1
+#define SYSOPENDIR  2
+#define SYSCLOSE    3
+#define SYSREAD     4
+#define SYSREADDIR  5
+#define SYSWRITE    6
+
+FSYSP sysp = {0,0,0,0};                 // システムコールパラメータバッファ
+int   sysSem0;                          // 初期値 0 のセマフォ
+int   sysSem1;                          // 初期値 1 のセマフォ
+int   sysSem2;                          // 初期値 0 のセマフォ
+
+// サーバとランデブーする
+int rende(int op, int p1, int p2, int p3) {
+  semP(sysSem1);                        // sysp の利用権を取る
+  sysp.op   = op;                       //   システムコールの種類を書き込む
+  sysp.prm1 = p1;                       //   第1パラメータを書き込む
+  sysp.prm2 = p2;                       //   第2パラメータを書き込む
+  sysp.prm3 = p3;                       //   第3パラメータを書き込む
+  semV(sysSem0);                        // fsProc が走り始める
+  semP(sysSem2);                        // fsProc が終了するのを待つ
+  int r = sysp.op;                      // システムコールの結果を取り出す
+  semV(sysSem1);                        // 他のユーザが sysp を使用できる
+  return r;
+}
+
+// OPEN システムコール
+public int open(int mod, char[] path) {
+  int fd = rende(SYSOPEN, mod, __AtoI(path), 0);
+//  printf("open(%d,\"%s\")=%d\n", mod, path, fd);
+  return fd;
+}
+
+// OPENDIR システムコール
+public int openDir(char[] path) {
+  int fd = rende(SYSOPENDIR, __AtoI(path), 0, 0);
+//  printf("openDir(\"%s\")=%d\n", path, fd);
+  return fd;
+}
+
+// CLOSE システムコール
+public int close(int fd) {
+  int r = rende(SYSCLOSE, fd, 0, 0);
+//  printf("close(%d)=%d\n", fd, r);
+  return r;
+}
+
+// READ システムコール
+public int read(int fd, void[] buf, int len) {
+  int r = rende(SYSREAD, fd, __AtoI(buf), len);
+//  printf("read(%d,0x%04x,%d)=%d\n", fd, __AtoI(buf), len, r);
+  return r;
+}
+
+// READDIR システムコール
+public int readDir(int fd, DIR dir) {
+  int r = rende(SYSREADDIR, fd, __AtoI(dir), 0);
+//  printf("readDir(%d,0x%04x)=%d\n", fd, __AtoI(dir), r);
+  return r;
+}
+
+// WRITE システムコール
+public int write(int fd, void[] buf, int len) {
+  int r= rende(SYSWRITE, fd, __AtoI(buf), len);
+//  printf("write(%d,0x%04x,%d)=%d\n", fd, __AtoI(buf), len, r);
+  return r;
+}
+
+/*
+ *  FAT ファイルシステムサーバの本体
+ */
+// fatFsMain
+public void fatFsMain() {
+  readMeta();                           // MBR、BPB を読んで blkFile を準備する
+
+  for (;;) {
+    semP(sysSem0);                      // システムコールを待つ
+    int op = sysp.op;
+    if (op==SYSOPEN) {                  // OPEN システムコールなら
+      op = sysOpen(sysp.prm1,           //   mod : オープンモード
+                   __ItoA(sysp.prm2));  //   name: ファイル名
+      sysp.op = op;                     //   処理結果を返す
+    } else if (op==SYSOPENDIR) {        // OPENDIR システムコールなら
+      op=sysOpenDir(__ItoA(sysp.prm1)); //   name: ディレクトリファイル名
+      sysp.op = op;                     //   処理結果を返す
+    } else if (op==SYSCLOSE) {          // CLOSE システムコールなら
+      op = sysClose(sysp.prm1);         //   fd  : ファイル番号
+      sysp.op = op;                     //   処理結果を返す
+    } else if (op==SYSREAD) {           // READ システムコールなら
+      op = sysRead(sysp.prm1,           //   fd  : ファイル番号
+                   __ItoA(sysp.prm2),   //   buf : バッファアドレス
+                   sysp.prm3);          //   len : 読み出しサイズ
+      sysp.op = op;                     //   処理結果を返す
+    } else if (op==SYSREADDIR) {        // READDIR システムコールなら
+      op = sysReadDir(sysp.prm1,        //   fd  : ファイル番号
+                   __ItoA(sysp.prm2));  //   dir : バッファアドレス
+      sysp.op = op;                     //   処理結果を返す
+    } else if (op==SYSWRITE) {          // WRITE システムコールなら
+      op = sysWrite(sysp.prm1,          //   fd  : ファイル番号
+                   __ItoA(sysp.prm2),   //   buf : バッファアドレス
+                   sysp.prm3);          //   len : 書き込みサイズ
+      sysp.op = op;                     //   処理結果を返す
+    } else  {                           // 未知のシステムコールなら
+      sysp.op = -1;                     //   エラー
+    }
+    semV(sysSem2);
+  }
+}
+
+/*
+ *  初期化
+ */
+// fatFsInit
+public void fatFsInit() {
+  sysSem0 = newSem(0);
+  sysSem1 = newSem(1);
+  sysSem2 = newSem(0);
+
+  blkInit();                            // ドライバの初期化等
+}

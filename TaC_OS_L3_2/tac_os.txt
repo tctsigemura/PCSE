@@ -1,0 +1,717 @@
+	                                             2013.05.21(2015.05.10改訂)
+「TaC-OS 組込み版」のドキュメント(tac_os.txt : v0.6.1)
+ --- 情報電子総合演習資料 ---
+
+1. ファイルの構成
+  以下は，配布物のディレクトリ・ファイル構成の説明である．
+  util/ を除きコンポーネント図と比較しながら読むと分かりやすい．
+
+   util/		C-- のサポートルーチン(基本的に全 C-- プログラムが使用)
+	GNUmakefile	util ディレクトリの gmake 用 Makefile
+	Makefile	util ディレクトリの make 用 Makefile
+	crt0.s		スタートアップルーチン、便利ルーチン
+	util.cmm	printf、便利ルーチン(panic関数追加)
+      *	util.h		crt0.s, util.cmm の外部インタフェース
+
+   kernel/              TaC-OS 本体
+	GNUmakefile	kernel ディレクトリの gmake 用 Makefile
+	Makefile	kernel ディレクトリの make 用 Makefile
+        proc.h		PCB やセマフォのデータ構造を定義
+	kernAsm.s	カーネルのアセンブリ言語部分(ディスパッチャ等)
+	kernAsm.h	kernAsm.s の外部インタフェース
+	kernMemory.cmm	メモリ管理(malloc, free システムコール)
+	kernMemory.h	kernMemory.cmm の外部インタフェース
+        usrInit.cmm	ユーザプロセスの登録と初期化(アプリにより変更)
+        usrInit.h	usrInit.cmm の外部インタフェース
+   	kernMain.cmm	カーネル本体(main関数を含む)
+      * kernel.h	カーネルが公開するシステムコール
+
+   vgaWin/		ディスプレイにウインドを定義し管理するモジュール
+	GNUmakefile	vgaWin ディレクトリの gmake 用 Makefile
+	Makefile	vgaWin ディレクトリの make 用 Makefile
+	vgaWin.cmm	VGA ディスプレイにウインドを作って管理するルーチン
+      * vgaWin.h	vgaWin.cmm の外部インタフェース
+
+以下はプロセスとして実装されている．
+おおよそ，*.cmm ファイルがクラスまたはパッケージに対応している．
+*.h ファイルが，それらの外部インタフェースを定義している．
+各ディレクトリの class.txt にクラスの解説が書いてある．
+
+   fatFs/		FAT16 ファイルシステム・サーバプロセス
+	class.txt	hdd.cmm,blkFile.cmm,fatSys.cmm で定義されるクラスの解説
+	GNUmakefile	fatfs ディレクトリの gmake 用 Makefile
+	Makefile	fatfs ディレクトリの make 用 Makefile
+   	dirEnt.h	ディレクトリ情報(一部)を表現する構造体
+	hdd.cmm		ハードディスクドライバ(PIOモード)
+	hdd.h		hdd.cmm の外部インタフェース
+	blkFile.cmm	クラスタ単位で操作する簡単なファイル
+	blkFile.h	blkFile.cmm の外部インタフェース
+	fatSys.cmm	ファイル関連システムコールの処理ルーチン
+	fatFs.cmm	ファイルシステム・サーバプロセス・メインルーチン
+			(ユーザが呼出すシステムコールのスタブと，スタブと
+			 通信するサーバプロセスが含まれる．サーバプロセスは
+			 fatSys.cmm を使用してシステムコールを処理させる)
+      * fatFs.h		ファイルシステム・サーバプロセスが公開するサービス
+
+以下はユーザプロセスのサンプル
+
+   playerProc/		MP3ファイル再生制御部とデータ転送プロセス
+			(MP3 デコーダ LSI の制御方法のサンプルも含む)
+	class.txt	player.cmm, mp3.cmm で定義されるクラスの解説
+	GNUmakefile	playerProc ディレクトリの gmake 用 Makefile
+	Makefile	playerProc ディレクトリの make 用 Makefile
+	mp3.cmm		MP3 デコーダ LSI のドライバ
+	mp3.h		mp3.cmm の外部インタフェース
+	player.cmm	再生制御部とデータ転送プロセス
+      * playerProc.h	player.cmm の外部インタフェース
+
+   kbdProc/		キーボードドライバとユーザプロセスのサンプル
+			(シェルもどき ls, cat, dump, play コマンドが実行できる)
+	class.txt	kbd.cmm, scConv.cmm で定義されるクラスの解説
+	useCase.txt	キーボードから文字コードを入力する手順を検討したもの
+	GNUmakefile	kbdProc ディレクトリの gmake 用 Makefile
+	Makefile	kbdProc ディレクトリの make 用 Makefile
+	kbd.cmm		キーボードドライバ(スキャンコードを受信する)
+	kbd.h		kbd.cmm の外部インタフェース
+	scConv.cmm	スキャンコード=>文字列変換ルーチン
+	scConv.h	scConv.cmm の外部インタフェース
+	kbdMain.cmm	キーボード操作を使用するプロセスの例
+      * kbdProc.h	kbdMain.cmm の外部インタフェース
+
+   lifeProc/		ユーザプロセスのサンプル(ライフゲーム)
+	GNUmakefile	lifeProc ディレクトリの gmake 用 Makefile
+	Makefile	filfProc ディレクトリの make 用 Makefile
+	lifeMain.cmm	vgaWin と sleep を使用するプロセスの例
+      * lifeProc.h	lifeMain.cmm の外部インタフェース
+
+2. プロセスの構造
+
+    PCB 構造体は proc.h 中に以下のように定義されている。
+
+    ------ kernel/proc.h ---------------------------------------------------
+    // プロセスコントロールブロック(PCB or TCB)
+    struct PCB {
+      int   sp;                          // プロセスのコンテキスト
+                                         // (他のレジスタはスタックに置く)
+      int   pid;                         // プロセス番号
+      int   stat;                        // プロセスの状態
+      int   nice;                        // プロセスの本来優先度
+      int   enice;                       // プロセスの実質優先度
+
+      // プロセスは重連結環状リストで管理
+      PCB   prev;                        // PCB リスト(前へのポインタ)
+      PCB   next;                        // PCB リスト(次へのポインタ)
+
+      int   magic;                       // スタックオーバーフローを検知
+    };
+    ------------------------------------------------------------------------
+
+    (1) プロセスのコンテキストはユーザスタックに置き、PCBにはSPだけ保存する。
+        kernAsm.sの_dispatchがコンテキストの保存、_startProcが復元ルーチン。
+
+	スタックに保存するレジスタは C-- のレジスタ変数だけである。C-- から
+	_dispatch が呼ばれるのなら、呼び出し側で他の必要なレジスタは保存され
+	ているはずである。
+
+	必ず割込み禁止状態で呼出されるので push flag は本来不要である。しかし、
+	新しいプロセスは _startProc から走り始めるので、新しいプロセスとブロッ
+	ク中のプロセスのスタック構造を共通にするためにフラグも push している。
+	新しいプロセスは、最後の reti 命令でフラグをロードし、割込み許可状態で
+	実行を開始する。
+
+    ------ kernel/kernAsm.s ------------------------------------------------
+    _dispatch
+	push	flag		; 割込み許可状態を保存する
+	push	fp		; フレームポインタ
+	push	g6		; 以下で保存するのは
+	push	g7		;  C-- のレジスタ変数だけ。
+	push	g8		; _dispatch が C-- から呼び出される
+	push	g9		;  前提で考えている。
+	push	g10		; C-- のバージョンその他に依存しているので
+	push	g11		;  要注意部分！！！
+	ld	g1,_curProc	; dispatch を呼出したプロセスの PCB
+	st	sp,0,g1		; SP 保存領域にストア
+
+    _startProc
+	call	_selProc	; C-- で記述された次のプロセス選択ルーチン
+	ld	g1,_curProc	; 次に実行するプロセス
+	ld	sp,0,g1		; PCB から SP を取り出す
+	pop	g11		;
+	pop	g10		; レジスタ変数を復元する
+	pop	g9		; この部分も C-- のバージョン、その他に
+	pop	g8		;   依存しているので
+	pop	g7		;     要注意部分！！！
+	pop	g6		;
+	pop	fp		; フレームポインタ復元
+	reti			; フラグと PC を復元
+    ------------------------------------------------------------------------
+
+    (2) stat の値は P_RUN(実行可能または実行中)、P_WAIT(実行不可能)のどちらか。
+    	P_RUN 状態のプロセスは schProc 関数が readyQueue に enice 順で置く。
+
+    (3) enice は、nice と同じ値を持つ。(将来、優先度逆転現象の対策等で使用？)
+
+    (4) プロセスキューは番兵つきの重連結環状リストで管理される。
+    	例えば、readyQueue の初期化では番兵用の空 PCB を登録している。
+	readyQueue の番兵は優先度順でキューを探索するときの処理を簡単にする
+	ために、最低の優先度より更に低い優先度を持たせてある。
+
+    ---- kernel/kernMain.cmm の main 関数の一部 ----------------------------
+    // readyQueue の初期化
+    readyQueue = malloc(sizeof(PCB));                    // readyQueueに番兵登録
+    readyQueue.next = readyQueue.prev  = readyQueue;
+    readyQueue.nice = readyQueue.enice = P_LOW_PRI + 1;  // 通常未使用の低優先度
+    ------------------------------------------------------------------------
+
+    	セマフォの作成ルーチンでも空 PCB を登録している。
+
+    ---- kernel/kernMain.cmm の newSem 関数の一部 --------------------------
+    SEM s = malloc(sizeof(SEM));                         // malloc は割り込み
+    s.cnt = init;                                        //  禁止で使用する
+    PCB p = malloc(sizeof(PCB));                         // 番兵を作る
+    s.queue = p.prev = p.next = p;
+    ------------------------------------------------------------------------
+
+        プロセスキューにプロセスを挿入するときは、insProc 関数を用いる。
+	プロセスキューからプロセスを削除するときは delProc 関数を用いる。
+
+    ---- kernel/kernMain.cmm -----------------------------------------------
+    // プロセスキューで p1 の前に p2 を挿入する
+    void insProc(PCB p1, PCB p2) {
+      p2.next = p1;
+      p2.prev = p1.prev;
+      p1.prev = p2;
+      p2.prev.next = p2;
+    }
+
+    // プロセスキューで p を削除する
+    void delProc(PCB p) {
+      p.prev.next = p.next;
+      p.next.prev = p.prev;
+    }
+    ------------------------------------------------------------------------
+
+    (5) プロセススケジューラ(schProc)関数は、readyQueue の先頭から調べて、
+    	実質優先度(enice)が、スケジューリングを受けるプロセスより低いプロセス
+	を探す。そのようなプロセスを見つけたら、そのプロセスの直前に挿入する。
+	優先度が低いプロセスが見付からない場合は、番兵の直前(プロセスキューの
+	末尾)に挿入するようになる。
+
+    ---- kernel/kernMain.cmm -----------------------------------------------
+    // カーネルデータ
+    public PCB curProc = null;                          // 現在のプロセス
+    PCB readyQueue = null;                              // 実行可能列
+    ...
+    // プロセススケジューラ：プロセスを優先度順で readyQueue に登録する
+    void schProc(PCB proc) {
+      int nice = proc.enice;
+
+      PCB head = readyQueue.next;                       // 実行可能列から
+      while (head.enice<=nice)                          //  優先度がより低い
+        head = head.next;                               //   プロセスを捜す
+      insProc(head, proc);                              // 見つけたプロセスの
+    }                                                   //  直前に挿入する
+    ------------------------------------------------------------------------
+
+    (6) 次に実行するプロセスは selProc 関数が決める。実行中プロセスの PCB は
+    	curProc が指す。このときも、readyQueue の中に置いたままになっている。
+
+    ---- kernel/kernMain.cmm -----------------------------------------------
+    // 次のプロセス選択：readyQueue の先頭プロセスを curProc に選ぶ
+    // (ディスパッチャ(アセンブリ言語プログラム)から呼ばれる)
+    public void selProc() {
+      PCB p = curProc;                                     // 前のプロセスを記録
+      curProc = readyQueue.next;                           // readyQueue先頭が
+                                                           //  次の実行プロセス
+      if (p.magic!=P_MAGIC) {                              // PCB が破壊されて
+        panic("PID(%d):selProc:stack over flow", p.pid);   //   いないか調べる
+      }
+    }
+    ------------------------------------------------------------------------
+
+    (7) magic は、selProc 関数がスタックあふれを検知するために使用する。
+    	プロセスのスタックは PCB 領域に連続して割り振られる。newProc 関数で
+	一回の malloc でまとめて領域を割り付け、プロセスの SP を領域の最後に
+	初期化している。selProc 関数で magic の値が変化していないことをチェッ
+	クしている。変化があればスタックが PCB まで突き抜けた証拠になる。
+
+    ---- kernel/kernMain.cmm の newProc 関数の一部 --------------------------
+    // PCB とスタック領域を割り付ける
+    int siz = sizeof(PCB)+stkSiz;                        // 領域の合計サイズ
+    PCB pcb = malloc(siz);                               // 領域を確保
+    int sp = __AtoI(pcb) + siz;                          // スタック底のアドレス
+    ------------------------------------------------------------------------
+
+    (8) プロセスは、newProc 関数で生成される。生成直後のプロセスのコンテキス
+    	トは _startProc アセンブラルーチンにより CPU にロードされる。
+	_startProc ルーチン最後の reti 命令により FLAG と PC が CPU にロード
+	されたとき、割込み許可状態で開始アドレスから実行が始まる。
+
+    ---- kernel/kernMain.cmm の newProc 関数の一部 --------------------------
+    // コンテキストを初期化する(C-- v1.0.1 に依存している)
+    mem[sp=sp-1] = start;                                // 開始アドレス
+    mem[sp=sp-1] = 0x8000;                               // 割込許可状態のフラグ
+    mem[sp=sp-1] = 0;                                    // FP の初期値
+    mem[sp=sp-1] = 0;                                    // G6 の初期値
+    mem[sp=sp-1] = 0;                                    // G7 の初期値
+    mem[sp=sp-1] = 0;                                    // G8 の初期値
+    mem[sp=sp-1] = 0;                                    // G9 の初期値
+    mem[sp=sp-1] = 0;                                    // G10 の初期値
+    mem[sp=sp-1] = 0;                                    // G11 の初期値
+    pcb.sp = sp;                                         // SPの初期値を保存
+    ------------------------------------------------------------------------
+
+    (9) アイドルプロセス
+    	実行するプロセスがない場合に実行するプロセスである。優先度を最低にして
+	ある。このプロセスが存在するおかげでカーネル内で readyQueue が空の場合
+	を例外処理しなくて済む。
+
+3. セマフォ
+
+    SEM 構造体は proc.h 中に以下のように定義されている。
+
+    ------ kernel/proc.h ---------------------------------------------------
+    // セマフォ
+    struct SEM {
+      int   cnt;                         // カウンタ
+      PCB   queue;                       // プロセスキュー
+    };
+    ------------------------------------------------------------------------
+
+    (1) セマフォの使用方法
+    	ユーザは、newSem関数(newSemシステムコール)を使用してセマフォを作成する。
+    	セマフォは番号で管理する。
+
+    ------ セマフォの使用例 ------------------------------------------------
+    int sem = newSem(1);                  // 初期値１のセマフォ
+    semP(sem);                            // 作ったセマフォに P 操作
+    semV(sem);                            // 作ったセマフォに V 操作
+    ------------------------------------------------------------------------
+
+    (2) セマフォの実装
+    	セマフォの操作部分はクリティカルセクションになる。TaC-OS では、クリ
+	ティカルセクションを int r=setPri(0); と setPri(r); で囲んである。
+	(セマフォ操作以外のクリティカルセクションも同様)
+
+    	setPri 関数は、CPU の FLAG 値を引数値に変更し、関数実行前の CPU の
+	FLAG 値を返す関数である。フラグの値には割込み許可ビットが含まれてい
+	るので、setPri 関数を用いて割込み許可状態を変更すると同時に、以前の
+	割込み許可状態を調べることができる。この関数はkernAsm.sに記述してある。
+
+    ------ kernAsm.s -------------------------------------------------------
+    _setPri                     ; プロセッサの割り込みレベルを変更
+	ld	g0,1,sp		; 引数の値を G0 に取り出す
+	push	g0              ; 新しい状態をスタックに積み
+	ld	g0,flag		; 古いフラグの値を返す準備をする
+	reti                    ; reti は flag と PC を同時に pop する
+    ------------------------------------------------------------------------
+
+	セマフォ操作部分は kernMain.cmm 中に以下のように記述されている。
+	P 操作でプロセスがブロックする場合は、readyQueue から curProc を
+	削除(delProc)し、セマフォのプロセスキュー末尾に挿入(insProc)する。
+
+    ------ kernel/kernMain.cmm ---------------------------------------------
+    // セマフォの P 操作(システムコール)
+    public void semP(int sd) {
+      int r = setPri(0);                            // 割り込み禁止
+      if (sd<0 || semID <=sd)
+        panic("%d:semP(%d):illegal semID", curProc.pid, sd);
+
+      SEM s = sem[sd];
+      if (s.cnt>0) {                                // カウンタから引けるなら
+        s.cnt = s.cnt - 1;                          //   カウンタから引く
+      } else {
+        delProc(curProc);                           // 実行可能列から外し
+        curProc.stat = P_WAIT;                      // 実行不可能に変更する
+        insProc(s.queue, curProc);                  // セマフォの行列に登録
+        dispatch();                                 // プロセス切替え
+      }
+      setPri(r);                                    // 割込み状態を復元する
+    }
+    ------------------------------------------------------------------------
+
+	V 操作でプロセスを起床する場合は、セマフォのプロセスキュー先頭から
+	プロセスを取り出(delProc)し、スケジューリング関数(schProc)により、
+	readyQueue の適切な位置に挿入する。
+
+	V 操作にはディスパッチを発生しないもの(iSemV)と発生するもの(semV)があ
+	る。通常は semV を使用すればよいが、複数のプロセスを同時に起床するよう
+	な(複数のセマフォに連続して V 操作するような)場合は、iSemV を使用する。
+
+    ------ kernel/kernMain.cmm ---------------------------------------------
+    // ディスパッチを発生しないセマフォの V 操作(システムコール)
+    public boolean iSemV(int sd) {
+      int r = setPri(0);                             // 割り込み禁止
+      if (sd<0 || semID <=sd)
+        panic("%d:iSemV(%d):illegal semID", curProc.pid, sd);
+    
+      SEM s = sem[sd];
+      boolean ret = false;
+      if (s.queue.next==s.queue) {                   // 待ちプロセスが無いなら
+        s.cnt = s.cnt + 1;                           //   カウンタへ足す
+      } else {
+        PCB p = s.queue.next;                        // 待ち行列の先頭procを
+        delProc(p);                                  //  行列から外す
+        p.stat = P_RUN;                              // 実行可能に変更
+        schProc(p);                                  // 実行可能列に登録
+        ret = true;                                  // 実行可能列に変化あり
+      }
+      setPri(r);                                     // 割込み状態を復元する
+      return ret;                                    // 実行可能列の変化
+    }
+
+    // セマフォの V 操作(システムコール)
+    public void semV(int sd) {
+      int r = setPri(0);                             // 割り込み禁止
+      if (iSemV(sd))                                 // V 操作し必要なら
+        dispatch();                                  //  プロセスを切替える
+      setPri(r);                                     // 割込み状態を復元する
+    }
+    ------------------------------------------------------------------------
+
+
+    (3) 足らない機能
+    	一般に、ブロックしない P 操作、タイムアウトする P 操作が用意されること
+	が多いが現在のところ実装していない。
+	優先度逆転現象の解決を考えるとセマフォの所有者を管理する必要がある。
+	
+	演習：ブロックしない P 操作を追加しなさい。
+
+4. sleep 機能
+
+    指定時間プロセスの実行をブロックする機能をプロセスに提供する。セマフォと
+    割込みを用いて実装してある。
+
+    (1) sleep の使用方法
+
+    	sleep(時間);
+
+	時間は ms 単位である。現在の実装ではタイマーの精度は 10ms である。
+
+    (2) sleep の実装
+    	プロセス毎にタイマー用のカウンタとタイマー用のセマフォを持つ。tmrInit
+	関数でタイマーを初期化する。まず、タイマ２の割込みベクタを設定し、次に
+	10ms(TICK=10)間隔でタイマ２から割込みが発生するようにハードウェアを初
+	期化する。最後に、タイマー用セマフォを、最大プロセス数と同数、作成する。
+
+    ------ kernel/kernMain.cmm ---------------------------------------------
+    #define  PRC_MAX 10                              // プロセスは最大10個
+    ...
+
+    int[] tmrSem = array(PRC_MAX);                   // プロセスに専用セマフォ
+    int[] tmrCnt = array(PRC_MAX);                   // プロセス毎のカウンタ
+    ...
+
+    // タイマー初期化
+    void tmrInit() {
+      mem[0xfff6] = addrof(tmrIntr);                   // タイマ２ベクタ初期化
+      out(0x0008, 0x0004);                             // タイマ２割込み許可
+      out(0x000b, TICK);                               // タイマ２初期化
+      for (int i=0; i<PRC_MAX; i=i+1)                  // プロセスの数だけ
+        tmrSem[i] = newSem(0);                         //  セマフォを作る
+    }
+    ------------------------------------------------------------------------
+
+	sleep 関数がプロセスのタイマカウンタに時間をセットするとタイマーが稼働
+	中になる。sleep 関数はセマフォに P 操作しプロセスをブロックする。
+
+    	10ms 間隔で発生するタイマ２割込みにより tmrIntr 割込み関数が起動される。
+	tmrIntr 関数ではタイマ２を再初期化(TaC のハードウェア仕様によるとイン
+	ターバルタイマとして使用するために必要)したのち、全プロセスについて稼働
+	中のカウンタを探しカウンタの値を 10(ms) 小さくする。カウンタ値が非正に
+	なったら、該当プロセスをセマフォの V 操作により起床させる。
+
+	この場合は、複数のプロセスが起床される可能性があるので iSemV を使用す
+	る。実際に起床するプロセスがあった場合は、tmrIntr 関数の最後で dspProc
+	を呼び出しディスパッチングを試みる。起床したプロセスの優先度の方が
+	高かった場合は、この時点でプロセスが切り替わる。
+
+    ------ kernel/kernMain.cmm ---------------------------------------------
+    // タイマー割込みハンドラ
+    interrupt tmrIntr() {
+      out(0x000b, TICK);                             // タイマ２再初期化
+      boolean disp = false;                          // ディスパッチの必要性
+      for (int i=0; i<PRC_MAX; i=i+1) {
+        if (tmrCnt[i]>0) {                           // タイマー稼働中なら
+          tmrCnt[i] = tmrCnt[i] - TICK;              //  残り時間を減らす
+          if (tmrCnt[i]<=0) {                        // 時間が来たら
+            tmrCnt[i] = 0;                           //  タイマーを停止し
+            disp = iSemV(tmrSem[i]) || disp;         //   プロセスを起こす
+          }
+        }
+      }
+      if (disp)                                      // 実行可能列に変化が
+        dspProc();                                   //  あるならディスパッ
+    }                                                //   チを試みる
+
+    // タイマーを起動しブロックする(システムコール)
+    public void sleep(int ms) {                      // 指定時間(ms)
+      int r = setPri(0);                             // 割込み禁止
+      int p = curProc.pid;
+    
+      if (ms<0)                                      // 負の時間はまずい
+        panic("%d:sleep(%d):illegal time", p, ms);
+    
+      tmrCnt[p] = ms;                                // タイマーを起動し
+      if (ms>0) semP(tmrSem[p]);                     //  プロセスをブロック
+      setPri(r);                                     // 割込み状態を復元する
+    }
+    ------------------------------------------------------------------------
+
+5. メモリ管理
+
+    (1) メモリ管理の使用方法
+
+    	p = malloc(サイズ);
+	free(p);
+
+	サイズはワード単位である。malloc が割り当てた領域は free で解放する。
+
+    (2) メモリ管理の実装
+        主記憶をファーストフィットの可変長領域方式で管理する。主記憶の未使用
+        領域を mblock 構造体の番兵付きの単方向リストとして管理する。未使用領
+        域の先頭に mblock 構造体を置く。memInitルーチンは、主記憶のカーネル
+        より後ろの領域全体を一つの空き領域としてリストに登録する。__end() と
+        __memsize は、crt0.s に記述された関数である。__end はカーネルの終端ア
+        ドレスを返し、__memsize は、カーネルの後ろにある空き領域のサイズを返す。
+
+    ------ kernel/kernMemory.cmm ---------------------------------------------
+    struct mblock {                           // malloc がメモリを管理する
+      mblock next;                            //   ためのデータ構造
+      int     size;
+    };
+
+    mblock mempool;                           // 空き領域リストのルート
+
+    public void memInit() {                   // プログラム起動前の初期化
+     mempool = __end();                       // 空き領域リストに番兵を
+     mempool.size = 0;                        // 作る．size=0によって結合
+                                              // される可能性がなくなる
+     mempool.next = __AddrAdd(mempool,2);     // 空き領域
+     mempool.next.size = __memsize() - 2;     // 空きメモリサイズ
+     mempool.next.next = null;
+    }
+    ------------------------------------------------------------------------
+
+         malloc ルーチンは、空き領域リストを先頭から手繰りながら要求を満たす
+         空き領域を探す。見付かった領域が分割できる場合は分割する。分割しても
+         mblock 構造体が格納できないほど小さくなる場合は分割しない。分割する
+         場合は、分割の前半が割当て領域、後半が空き領域になる。割当て領域は
+         ユーザに渡され、空き領域はリストにつなぎ込まれる。ユーザに渡すアドレ
+         スは mblock 構造体直後のアドレスである。割当て領域には正当な領域を識
+         別するためのマジックナンバーを書き込んでおく。
+
+    ------ kernel/kernMemory.cmm ---------------------------------------------
+    public void[] malloc(int s) {                 // メモリ割り当て
+      int r = setPri(0);                          // 割込み禁止
+      s=s+2;                                      // 制御データ分大きく
+
+      mblock p = mempool;                         // 直前の領域
+      mblock m = p.next;                          // 対象となる領域
+
+      while (__ucmp(m.size,s)<0) {                // 領域が小さい間
+        p = m;                                    // リストを手繰る
+        m = m.next;
+        if (m==null)                              // リストの最後まできた
+          panic("malloc: no enough memory\n");
+      }
+
+      if (m.size==s||m.size==s+1||m.size==s+2) {  // ほぼ、ピッタリの領域だ
+        p.next = m.next;
+      } else {                                    // 領域を分割する価値がある
+        int ss = m.size - s;                      // ss は最低でも 3
+        mblock q = __AddrAdd(m, s);               // 残り領域
+        q.next = m.next;
+        q.size = ss;
+        p.next = q;
+        m.size = s;
+      }
+      m.next = __end();                           // マジックナンバー格納
+      setPri(r);                                  // 割込み許可
+      return __AddrAdd(m, 2);                     // 管理領域を除いて返す
+    }
+    ------------------------------------------------------------------------
+
+         free ルーチンは malloc が割り付けた領域を空き領域リストに戻す。空き
+         領域リストを先頭から手繰り、解放する領域を挿入する位置を探す。位置が
+         決まったら、前後の領域と隣接しているか調べ、隣接している場合は領域を
+         結合する。隣接していない場合はリストに挿入する。
+
+    ------ kernel/kernMemory.cmm -------------------------------------------
+    public void free(void[] t) {                  // 領域解放
+      int r = setPri(0);                          // 割込み禁止
+      mblock q  = __AddrAdd(t, -2);               // 解放する領域
+      mblock p = mempool;                         // 直前の空き領域
+      mblock m = p.next;                          // 直後の空き領域
+
+      if (q.next!=__end()) badaddr();             // 領域マジックナンバー確認
+
+      while (__acmp(m, q)<0) {                    // 解放する領域の位置を探る
+        p = m;
+        m = m.next;
+        if (m==null) break;
+      }
+
+      void[] ql = __AddrAdd(q,q.size);            // 解放する領域の最後
+      void[] pl = __AddrAdd(p,p.size);            // 直前の領域の最後
+
+      if (__acmp(q,pl)<0||m!=null&&__acmp(m,ql)<0)// 未割り当て領域では？
+        badaddr();
+
+      if (pl==q) {                                // 直前の領域に隣接している
+        p.size = p.size + q.size;
+        if (ql==m) {                              // 直後の領域とも隣接してる
+          p.size = p.size + m.size;
+          p.next = m.next;
+        }
+      } else if (m==null) {                       // ヒープの最後の部分
+        p.next = q;
+        q.next = null;
+      } else if (ql==m) {                         // 直後の領域に隣接している
+        q.size = q.size + m.size;
+        q.next = m.next;
+        p.next = q;
+      } else {
+        p.next = q;
+        q.next = m;
+      }
+      setPri(r);                                  // 割込み許可
+    }
+    ------------------------------------------------------------------------
+
+6. ユーザプロセスの作成
+
+   以下では、配布された TaC-OS のソースプログラムに新しいプロセスを追加する
+   手順を説明する。
+
+   (1) ディレクトリの作成
+       プロセスに限らず、新しいモジュールを TaC-OS に追加する場合は、kernel
+       ディレクトリと同レベルに新しいディレクトリを作成し、その中に追加のプロ
+       グラムを置く。fatFS、kbdProc、lifeProc、vgaWin ディレクトリが例である。
+
+   (2) GNUmakefile の作成
+       ビルドには GNU の make コマンド(gmake)を使用する。BSD make と混乱しない
+       ないように Makefile ではなく、gmake 専用の GNUmakefile にコンパイル手
+       順を書く。
+
+       新しいディレクトリに、以下のような内容の GNUmakefile を作成する。OBJS
+       にはこのディレクトリの全 C-- ソースに対応する .o ファイルを列挙する。
+
+    ---- モジュールの GNUmakefile の例------------------------------------------
+    OBJS=lifeMain.o                 <--- 複数あるときはスペース区切りで列挙
+
+    include ../Makefile.rul
+    ------------------------------------------------------------------------
+
+    (3) ソースコードの作成
+    	プロセスの初期化ルーチンとメインルーチンを含む .cmm ファイルと、それら
+	のプロトタイプ宣言を含む .h ファイルを作成する。以下は lifeProc の例で
+	ある。util.h、kernel.h は必ずインクルードする。
+
+    ---- lifeProc/lifeMain.cmm ---------------------------------------------
+    #include <util.h>
+    #include <kernel.h>
+    #include <vgaWin.h>
+
+    #include "lifeProc.h"
+    ...
+
+    // 初期化ルーチン
+    public void lifeInit() {
+      win = newWin(0, X0, YS, XS);
+      ...
+    }
+
+    // ライフゲームメインルーチン
+    public void lifeMain() {
+      for (;;) {
+       	...
+      }
+    }
+    ------------------------------------------------------------------------
+
+        .h ファイルにはモジュールの外部インタフェースを記述する。以下は、
+	lifeProc の例である。
+
+    ---- lifeProc/lifeProc.h -----------------------------------------------
+    public void lifeInit();            // LIFE ゲームの初期化ルーチン
+    public void lifeMain();            // LIFE ゲームのメインルーチン
+    ------------------------------------------------------------------------
+
+    (4) カーネルへの登録
+	TaC-OS では、カーネルが呼び出す初期化関数(usrInit)に、新プロセスの作
+	成等をユーザが書き加えることで、プロセスを登録する。また、割込みベクタ
+	の初期化のように、マルチタスクモードに移行する前にすべき処理がある場合
+	も、usrInit 関数にその呼び出しをユーザが直接書き加える。
+
+    ---- kernel/usrInit.cmm ------------------------------------------------
+    // プロセス毎にインクルードする
+    #include "../kbdProc/kbdProc.h"
+    #include "../lifeProc/lifeProc.h"
+    #include "../fatFs/fatFs.h"
+
+    public void usrInit() {
+      // ユーザプロセスを作る
+      newProc(addrof(kbdMain), P_STKSIZ, 10);        // kbdProc をつくる
+      newProc(addrof(lifeMain), P_STKSIZ, 100);      // lifeProc をつくる
+      newProc(addrof(fatFsMain), P_STKSIZ, 20);      // fatFsProc をつくる
+
+      // プロセスの初期化ルーチンを実行する
+      kbdInit();                                     // kbdProc を初期化する
+      lifeInit();                                    // lifeProc を初期化する
+      fatFsInit();                                   // fatFsProc を初期化する
+    }
+    ------------------------------------------------------------------------
+
+    (5) プロセスなどのモジュールをルートディレクトリの GNUmakefile へ登録する。
+    	多くの組込み用 OS では、モジュールはカーネルと一体にリンクして主記憶に
+	ロードして実行される。TaC-OS では、ルートディレクトリの GNUmakefile に
+	登録することでモジュールが kernel.bin ファイルにリンクされる。
+
+    ---- GNUmakefile ----------------------------------------------------------
+    MAKEFLAGS=--no-print-directory
+
+    # crt0 が含まれる util を最初にすること！！
+    SUBDIRS:=util kernel kbdProc lifeProc vgaWin    <--- ここにモジュールを追加
+
+    OBJS=$(foreach dir, $(SUBDIRS),  $(dir)/mod.o )
+
+    all : clean kernel.bin
+
+    kernel.bin :
+            $(foreach dir, $(SUBDIRS), ${MAKE} --directory=$(dir); )
+            ld-- kernel.o ${OBJS} > kernel.sym
+            objbin-- 0x0000 kernel.bin kernel.o
+
+    clean :
+            rm -f kernel.bin *.o *.sym *.lst  *~
+            $(foreach dir, $(SUBDIRS), $(MAKE) --directory=$(dir) clean; )
+    ------------------------------------------------------------------------
+
+7. システムの起動
+
+   TaC-OS は kernMain.cmm の main 関数から実行が始まる。ここでは、(1)sleep シ
+   ステムコールのためにタイマーの初期化、(2) readyQueue の初期化を行った後、
+   (3)usrInit 関数を呼び出しユーザプロセスなどのモジュールを初期化する。最後
+   に、(4)startProc を呼び出し、ユーザプロセスの一つの実行を開始する。
+   その後は、ユーザプロセスや割込みハンドラが dispatch 関数を呼び出すことで、
+   次のプロセスに実行が切り替わる。
+
+    ---- kernel/kernMain.cmm  ----------------------------------------------
+    // カーネルのメイン
+    public void main() {
+      // メモリ管理初期化、これを最初にすること！！
+      memInit();
+
+      //タイマー初期化(sleep システムコールの準備)
+      tmrInit();
+
+      // readyQueue の初期化
+      ... アイドルプロセスの追加など ...
+
+      // システムスタート
+      usrInit();                                     // ユーザプロセスの初期化
+      curProc = readyQueue.next;                     // 実行プロセスを決める
+      startProc();                                   // プロセス実行開始
+    }
+    ------------------------------------------------------------------------

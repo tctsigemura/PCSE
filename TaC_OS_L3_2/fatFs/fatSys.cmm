@@ -1,0 +1,348 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ * fatFs/fatSys.cmm : FAT16 ファイルシステムのシステムコール処理部分
+ *
+ * 2011.05.28    v0.1.0 : 一応、完成
+ * 2011.05.23           : boot.cmm を基に作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include <kernel.h>              // malloc, free を使用するために必要
+
+#include "dirEnt.h"
+#include "blkFile.h"
+#include "fatSys.h"
+#include "fatFs.h"
+
+//----------------------------------------------------------------------------
+// STRUTIL : ファイル名を操作するための文字列機能クラス
+//----------------------------------------------------------------------------
+/*
+ * toUpper : アルファベット小文字を大文字へ変換
+ *   c     : 変換する文字
+ */
+char toUpper(char c) {
+  if ('a' <= c && c <= 'z') c = c - 0x20;
+  return c;
+}
+
+/*
+ * strnncmp : 文字列比較の変形バージョン
+ *   (バイト文字列と C-- 文字列を文字数制限付きで、大文字小文字無視で比較する)
+ *   s1   : ディレクトリから読み出したデータ(バイト単位の文字列)
+ *   offs : s1 中の着目している文字の開始位置
+ *   s2   : C-- 型の文字列
+ *   len  : 比較する文字数
+ */
+int strnncmp(int[] s1, int offs, char[] s2, int len) {
+  for(int i=0; i<len; i=i+1) {
+    int t = toUpper(byte(s1,offs+i)) - toUpper(s2[i]);
+    if (t!=0) return t;
+  }
+  return 0;
+}
+
+/*
+ * isDelm  : 文字がパス名の区切り文字か判定する
+ *   c     : 文字
+ */
+boolean isDelm(char c) {
+  return c=='/'||c=='.'||c=='\0';
+}
+
+/*
+ * getFStr : n 文字以内のファイル名を str 取り出す
+ *   path  : パス
+ *   ptr   : path の着目位置
+ *   str   : 格納場所
+ *   n     : 最大文字数
+ */
+int getFStr(char[] path, int ptr, char[] str, int n) {
+  int i = 0;
+  while (!isDelm(path[ptr])) {           // 区切り文字を見つけたら終了
+    if (i<n) {                           // 制限字数をこえていなければ
+      str[i] = path[ptr];                //   文字を取り出す
+      i = i + 1;  
+    }                                    // 制限文字数をこえた場合は
+    ptr = ptr + 1;                       //   読み捨てる
+  }
+  for (;i<n; i=i+1)                      // 余った部分は ' ' を埋める
+    str[i] = ' ';
+  str[i] = '\0';                         // デバッグ時に便利なように
+  return ptr;
+}
+
+/*
+ * getFname : パスからファイル名と拡張子を取り出し8+3文字形式で格納する
+ *   path  : パス名
+ *   ptr   : path の着目位置
+ *   fname : ファイル名
+ *   fext  : 拡張子
+ */
+int getFname(char[] path, int ptr, char[] fname, char[] fext) {
+  while(path[ptr]=='/') ptr = ptr + 1;   // '/' を読み飛ばす
+  ptr = getFStr(path, ptr, fname, 8);    // ファイル名を取り出す
+  if (path[ptr]=='.') ptr = ptr + 1;     // '.' を読み飛ばす
+  ptr = getFStr(path, ptr, fext,  3);    // 拡張子を取り出す
+  while (path[ptr]=='.') {               // ２重拡張子なら
+    ptr = ptr + 1;                       //   '.' と
+    while (!isDelm(path[ptr]))           //     続く文字列を
+      ptr = ptr + 1;                     //       読み飛ばす
+  }
+  return ptr;
+}
+
+//----------------------------------------------------------------------------
+// SRCHDIR : パスを解析しながらファイルを探索する
+//----------------------------------------------------------------------------
+/*
+ * srchDir : ファイルをディレクトリから探し開始クラスタとファイル長を求める
+ *   name  : 探すファイルのファイル名
+ *   ext   : 探すファイルの拡張子
+ *   dir   : 探すディレクトリの情報を受取り、見つけたファイルの情報を返す
+ */
+boolean srchDir(char[] name, char[] ext, DIR dir) {
+  char[] buf = malloc(BLKSIZ);           // ディレクトリを読み出すバッファ
+  int fd = openBlkFile(dir.clst);        // ディレクトリをオープンする
+  while (readBlk(fd, buf)>0) {           // EOF ではない間
+    for (int i=0; i<BLKSIZ*2; i=i+32) {  //   セクタの各エントリについて
+      dir.attr = byte(buf, i+11);        //     属性を取り出す
+      char c = byte(buf, i);             //     ファイル名の1文字目を取り出す
+      if (c!=0x00&&c!=0x05&&c!=0xe5&&    //     エントリが有効で
+          (dir.attr & 0x0a)==0 &&        //       ファイルかディレクトリで
+          strnncmp(buf,i,name,8)==0 &&   //         name が一致し
+	  strnncmp(buf,i+8,ext,3)==0) {  //           ext が一致するなら
+        dir.clst = Word(buf,i+26);       //     先頭クラスタ番号と
+        dir.lenH = Word(buf,i+30);       //       ファイルサイズを読み出す
+        dir.lenL = Word(buf,i+28);
+	closeBlkFile(fd);                //     ディレクトリをクローズする
+	free(buf);                       //     バッファを解放する
+	return true;                     //     見付かったので true で返る
+      }
+    }
+  }
+  closeBlkFile(fd);                      // ディレクトリをクローズする
+  free(buf);                             // バッファを解放する
+  return false;                          // 見付からなかったので false で返る
+}
+
+/*
+ * srchPath : パスの解析を行う
+ *   path   : 解析するパス
+ *   dir    : 見付かったファイルのディレクトリエントリを返す
+ */
+boolean srchPath(char[] path, DIR dir) {
+  char[] fname = malloc(9);              // 解析中のファイルの名前領域
+  char[] fext  = malloc(4);              // 解析中のファイルの拡張子領域
+  int p = 0;                             // パスの着目位置
+  int q = getFname(path,p,fname,fext);   // パスからファイル名を取り出す
+  dir.clst = 0;                          // ルートディレクトリの意味
+  dir.attr = 0x10;                       // ディレクトリの意味
+  while ((dir.attr & 0x10)!=0 && p!=q) { // ディレクトリかつファイル名が続く間
+    if (!srchDir(fname,fext,dir)) break; //   ファイルを探す、無いなら終了
+    p = q;                               //   パスの着目位置を進めて
+    q = getFname(path,p,fname,fext);     //     パスからファイル名を取り出す
+  }
+  free(fname);                           // 名前領域解放
+  free(fext);                            // 拡張子領域解放
+  return p==q;                           // パスの最後まで解析できていれば OK
+}
+
+//----------------------------------------------------------------------------
+// FILE : ファイル名とバイト単位で管理されるファイル
+//----------------------------------------------------------------------------
+struct FILE {
+  char[]  buffer;                        // ファイル毎のバッファ
+
+
+  int     bufPtr;                        //   バッファ上の現在位置
+  boolean isDir;                         // ファイルはディレクトリか？
+  int[]   len;                           // ファイルの長さ
+};
+
+FILE[] files = array(FILEMAX);           // ファイルオブジェクトの一覧表
+DIR dir = { null, 0, 0, 0, 0 };          // 一時使用領域
+
+/*
+ * fdToFile : ファイル番号から FILE オブジェクトに変換
+ *   fd     : ファイル番号
+ */
+FILE fdToFile(int fd) {
+  if (fd<0 || FILEMAX<=fd) return null;  // fd が不正
+  return files[fd];                      // FILE オブジェクトを特定する
+}
+
+/*
+ * sysOpen : OPEN システムコールの本体
+ *   mod   : READ/WRITE
+ *   path  : オープンするファイルへのパス
+ */
+public int sysOpen(int mod, char[] path) {
+  if (mod!=READ) return -1;              // モードは読込みだけサポート
+
+  int fd  = -1;
+  if (srchPath(path,dir) &&              // ファイル名が見付かり、かつ
+      (dir.attr&0x10)==0) {              //   通常ファイルなら
+    fd = openBlkFile(dir.clst);          // 下位ファイルシステムでオープン
+    FILE f = malloc(sizeof(FILE));       // FILE オブジェクトを作る
+    f.isDir = false;                     //   ディレクトリではない
+    f.len = malloc(2);
+    f.len[0] = dir.lenH;                 //   長さはディレクトリから
+    f.len[1] = dir.lenL;                 //     知った値にする
+    files[fd] = f;
+  }
+  return fd;
+}
+
+/*
+ * sysOpenDir : OPENDIR システムコールの本体
+ *   path     : オープンするディレクトリへのパス
+ */
+public int sysOpenDir(char[] path) {
+  int fd  = -1;
+  if (srchPath(path,dir) &&              // ファイル名が見付かり、かつ
+      (dir.attr&0x10)!=0) {              //   ディレクトリなら
+    fd = openBlkFile(dir.clst);          // 下位ファイルシステムでオープン
+    FILE f = malloc(sizeof(FILE));       // FILE オブジェクトを作る
+    f.isDir = true;                      //   ディレクトリ
+    f.buffer = malloc(BLKSIZ);           //   バッファを割り当てる
+    f.bufPtr = BLKSIZ*2;                 //   EOB の意味
+    files[fd] = f;
+  }
+  return fd;
+}
+
+/*
+ * sysClose : CLOSE システムコールの本体
+ *   fd     : ファイル番号
+ */
+public int sysClose(int fd) {
+  int r = closeBlkFile(fd);              // 下位ファイルシステムでクローズ
+  if (r==0) {                            // 正当なクローズなら
+    FILE f = files[fd];                  //   FILE オブジェクトを特定し
+    if (f.isDir)                         //   ディレクトリの場合は
+      free(f.buffer);                    //     セクタバッファ解放
+    else                                 //   ファイルの場合は
+      free(f.len);                       //     長さ領域解放
+    free(f);                             //   FILE オブジェクトを破棄する
+    files[fd] = null;                    //   使用中の判定に使うことが
+  }                                      //     あるのでクリアしておく
+  return r;
+}
+
+/*
+ * sysRead : READ システムコールの本体
+ *   fd    : ファイル番号
+ *   buf   : データを読み出すバッファ
+ *   len   : データバッファのサイズ
+ *           (現在のところ512バイトしかサポートしていない)
+ */
+int[] tmp = { 0, 0 };                    // 32bit 演算用の一時領域
+public int sysRead(int fd, char[] buf, int len) {
+  if (len!=BLKSIZ*2) return -1;          // セクタ単位のリードしかできない
+
+  FILE f = fdToFile(fd);                 // FILE オブジェクトに変換
+  if (f==null || f.isDir) return -1;     // 正当なファイルではない
+
+  if (f.len[0]==0 &&                     // 残りバイト数が
+      __ucmp(f.len[1],BLKSIZ*2)<0)       //   クタサイズより小さい場合は
+    len = f.len[1];                      // 読み出しバイト数を小さくする
+
+  if (len==0) return 0;                  // 残りが 0 バイトなら EOF
+
+  int r = readBlk(fd, buf);              // 実際にリードする
+  if (r<=0) return r;                    // エラーか EOF
+
+  Ld32(tmp, 0, len);                     // 読み出したデータのバイト数を
+  _sub32(f.len, tmp);			 //   ファイルの長さから引く
+  return len;
+}
+
+/*
+ * getDirEnt : ディレクトリエントリから DIR へ情報を読み出す
+ *   buf     : 読み出したディレクトリセクタ(ディレクトリエントリを１６個格納)
+ *   ptr     : buf 内でディレクトリエントリの位置
+ *   dir     : 読み出したデータを格納するデータ構造
+ */
+void getDirEnt(char[] buf, int ptr, DIR dir) {
+  // ファイル名を取り出す
+  for (int i=0; i<8; i=i+1)              // 名前を空白も含めて dir.name に
+    dir.name[i] = byte(buf, ptr+i);      //   取り出す
+  dir.name[8] = '.';                     // '.' を追加する
+  for (int i=8; i<11; i=i+1)             // 拡張子も空白も含めて dir.name に
+    dir.name[i+1] = byte(buf, ptr+i);    //   取り出す
+  dir.name[12] = '\0';                   // C-- 文字列として完成する
+
+  // その他情報を読み出す
+  dir.attr = byte(buf, ptr+11);          // 属性
+  dir.clst = Word(buf, ptr+26);          // 開始クラスタ
+  dir.lenH = Word(buf, ptr+30);          // ファイルサイズ上位16bit
+  dir.lenL = Word(buf, ptr+28);          // ファイルサイズ下位16bit
+}
+
+/*
+ * sysReadDir : READDIR システムコールの本体
+ *   fd       : ファイル番号
+ *   dir      : ディレクトリエントリから読み出したデータを格納するデータ構造
+ */
+public int sysReadDir(int fd, DIR dir) {
+  FILE f = fdToFile(fd);                  // FILE オブジェクトに変換
+  if (f==null || !f.isDir) return -1;     // 正当なディレクトリではない
+  char[] buf = f.buffer;
+
+  for (;;) {
+    // バッファにデータがなければ読む
+    if (f.bufPtr>=BLKSIZ*2) {              // EOB なら
+      if (readBlk(fd, buf)<=0)             //   次のブロックを読む
+        return 0;                          //     EOF なら 0 を返す
+      f.bufPtr = 0;                        //   ポインタをリセットする
+    }
+
+    int ptr = f.bufPtr;                    // 着目位置をディレクトリエントリ
+    f.bufPtr = ptr + 32;                   //   一つ分進める
+
+    int mark = byte(buf, ptr);             // ファイル名の１文字目
+    int attr = byte(buf, ptr+11);          // 属性バイト
+    if (mark!=0x00 && mark!=0x05 &&        // ディレクトリエントリが有効で
+        mark!=0xe5 && (attr&0x0a)==0) {    //   ファイルかディレクトリなら
+      getDirEnt(buf, ptr, dir);
+      break;
+    }
+  }
+
+  return 1;                              // 正常なら 1 を返す
+}
+
+/*
+ * sysWrite : WRITE システムコールの本体
+ *           (現在のところ実装されていない)
+ *   fd     : ファイル番号
+ *   buf    : 書き込むデータを格納したバッファ
+ *   len    : データのサイズ
+ */
+public int sysWrite(int fd, char[] buf, int len) {
+  return -1;                             // WRITE は実装されていない
+}

@@ -1,0 +1,91 @@
+MP3 デコーダについて概要
+
+デコーダLSI : VS1011e - MPEG AUDIO CODEC
+
+  VS1011e は、コンピュータと接続する SPI インタフェースと、オーディオアンプへ
+接続するアナログ出力を持っている。SPI インタフェースから MP3 ファイルを流し込
+むだけで音楽データを再生できる。この演習で使用する基板では VS1011e を 25MHzの
+クロックで使用するようになっている。
+
+1. TaC との接続
+
+  TaC とは、SPI と呼ばれる LSI 接続用のシリアルバスインタフェースで接続される。
+TaC は、SPI 用の特別なハードウェアを持っていないので、ほとんどの処理をソフト
+ウェアで実現することになる。
+  TaC の SPI インタフェースは、表１のような I/O アドレス、ビット配置になって
+いる。実際は 0x0080、0x0081 番地は単なるパラレルポートであり、各ビットの 0/1
+をソフトウェアで変化させ、SPI インタフェースを機能させる。
+
+   ---------------------------------------------------------  
+    表１ TaC  SPI インタフェースの I/O アドレスとビット配置
+   ---------------------------------------------------------  
+    @ Write To 0x0080
+          Bit 0 => MISO    (Serial Out)
+          Bit 1 => DCLK    (Unused in New Mode)
+          Bit 2 => SCLK    (SPI Clock)
+          Bit 3 => xCS     (Chip Select / Active L)
+          Bit 6 => BSYNC   (Byte Synchronous / Unused in New Mode)
+          Bit 7 => xRESET  (Reset Signal / Active L)
+            others => unused
+    @ Read From 0x0080
+          Bit 0 => MISI    (Serial In)
+          Bit 1 => DRQ     (Data Request)
+            others => unused
+
+    @ 0x0081
+          Bit 1 => DRQ     (Same as 0x0080 / Read Only)
+          Bit 7 => INTEN   (DRQ interrupt Enable when 1)
+            others => unused
+   ---------------------------------------------------------  
+  
+2. TaC からの操作
+
+  C-- 言語で記述した VS1011e 操作ルーチンのサンプルが playerProc/mp3.cmm に置いて
+ある。これは、64kBps 程度の MP3 データの再生には十分な性能を持っている。
+以下に、SPI インタフェースに１バイトのデータを出力する(SPI_WR)関数を示す。
+
+  ---------------------- playerProc/mp3.cmm の一部 -----------------------------
+  /*
+   * SPI_WR : one byte output for SPI.
+   *   Assuming xCS or xDCS is '0'
+   * this function can be use both SCI and SDI.
+   */
+  void SPI_WR(char spidata) {
+    int q,p = portdata & mp3_so;
+    int v = spidata;
+    for(int i=0; i<8; i=i+1) {
+      q = p | ((v>>7) & 0x0001);
+      out(mp3port1, q);              // set SCKL to '0'
+      out(mp3port1, q | ~mp3_sclk);  // set SCKL to '1'
+      v = v << 1;                    // prepairng next data bit
+    }
+    out(mp3port1, q);                // set SCLK to '0'
+  }
+  -------------------------------------------------------------------------
+
+  このルーチンを使用して mp3 データを再生したとき SPI バスの状況をオシロス
+  コープを用いて観察した。概略を以下に示す。
+
+  (1) DRQ 信号から求めたバスの使用率
+
+   32kbps mp3 データ再生	25% 程度	(DRQ の周期 36ms、Hの時間9ms)
+   64kbps mp3 データ再生	50% 程度 	(DRQ の周期 26ms、Hの時間13ms)
+   96kbps mp3 データ再生	75% 程度	(DRQ の周期 26ms、Hの時間19ms)
+   128kbps mp3 データ再生	100%		(DRQ は常時 H、再生不具合あり)
+
+  (2) SCLK 信号から求めた最大転送速度
+
+     上記のプログラムで生成した SCLK の周波数をオシロスコープで観測した。
+   その結果、SCLK の周波数は156kHz(周期 6.4us)と分かった。プログラムの他の
+   部分のオーバーヘッドが無い場合でも 156kbps がデータ転送速度の限界である。
+     これ以上の高速化するには、SPI_WR ルーチンをアセンブラで書き直す方法と、
+   パラレル-シリアル変換をハードウェア化する方法が考えられる。
+     なお、25MHz で動作する VS1011e は、SCKL の周波数を 4MHz 程度まで上げて
+   も良いので、LSI の性能としては 25 倍程度の余裕があることになる。
+
+3. 割込み
+
+    DRQ 信号を使用した割込みを使用できる。VS1011e は 2kb のバッファを持ってお
+  り、バッファのデータが少なくなった時点で DRQ および割込みを発生する。
+  DRQ の周期は比較的長いので、バス使用率に余裕がある状態では有効に使用できると
+  考えられる。

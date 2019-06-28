@@ -1,0 +1,138 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ * fatFs/hdd.cmm : ハードディスクドライバ
+ *
+ * 2011.05.23           : IPL-- をもとに新規作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include <kernel.h>                     // セマフォを使用するために必要
+#include "hdd.h"
+
+int hddSem;                             // 割込み待ち用のセマフォ
+
+/*
+ * error : ハードウェアエラー発生時、メッセージを表示してシステムを停止する
+ */
+void error() {
+  panic("HDD Drive error!");
+}
+
+/*
+ * waitStat : Alternate Status が目的の値になるのを待つ(Busy Wait)
+ *   msk    : 監視するビット
+ *   val    : 目的のビットパターン
+ */
+void waitStat(int msk, int val) {
+  int v;
+  do {
+    v=in(0x002e);
+    if ((v&1)!=0) error();
+  } while((v&msk)!=val);                // 待つ(Alternate Status使用)
+}
+
+/*
+ * chkErr : コマンド終了時、ドライブがエラーをおこしていないかチェックする
+ */
+void chkErr() {
+  if ((in(0x0037)&0x01)!=0) error();    // ステータスを読む(Status使用)
+}
+
+/*
+ * hddIntr : ハードディスク割込みルーチン
+ */
+interrupt hddIntr() {
+  chkErr();                             // ステータスを読む(割込み終了)
+  semV(hddSem);                         // V 操作は割込みルーチンの最後に置く
+}
+
+/*
+ * sendDevSel :  デバイスセレクションプロトコル(DEV=0専用)を実行する
+ */
+void sendDevSel() {
+  waitStat(0x88,0x00);                  // BSY=1 or DRQ=1 の間待つ
+  out(0x0036,0);                        // Device/Head
+  wait1u();                             // 400ns 以上待つ
+  waitStat(0x88,0x00);                  // BSY=1 or DRQ=1 の間待つ
+}
+
+/*
+ * sendPioInCmd :  PIO data in command プロトコルを実行する
+ *   cmd : コマンド
+ *   fe  : FEatures
+ *   sc  : Sector Count
+ *   sn  : Sector Number
+ *   cl  : Cylinder Low
+ *   ch  : Cylinder High
+ *   dh  : Device/Head
+ *   buf : 入力バッファ
+ *   len : 入力データ長
+ */
+void sendPioInCmd(int cmd, int fe, int sc, int sn, int cl, int ch, int dh,
+                  char[] buf, int len) {
+  sendDevSel();                         // デバイスセレクト
+  out(0x0031,fe);                       // Features レジスタ
+  out(0x0032,sc);                       // Sct Cnt  レジスタ
+  out(0x0033,sn);                       // Sct Num  レジスタ
+  out(0x0034,cl);                       // Cyl Low  レジスタ
+  out(0x0035,ch);                       // Cyl High レジスタ
+  out(0x0036,dh);                       // Dev/Head レジスタ
+  out(0x0037,cmd);                      // Command  レジスタ
+
+  semP(hddSem);			        // 割込み発生を待つ
+  for(int i=0; i<len; i=i+1)
+    buf[i] = in(0x0030);                // Data レジスタからデータを読む
+  in(0x002e);                           // Alternate Status 空読み
+  chkErr();
+}
+
+/*
+ * hddRead :  READ SECTOR コマンドを実行する
+ *   lbaH  : セクタアドレス(LBA)の上位 16bit
+ *   lbaL  : セクタアドレス(LBA)の下位 16bit
+ *   buf   : セクタのデータを入力するバッファ
+ */
+public void hddRead(int lbaH, int lbaL, char[] buf) {
+  waitStat(0x40,0x40);                  // ドライブレディをチェック
+  sendPioInCmd(0x20,                    // READ SECTOR リトライあり
+               0x00,                    // Features
+               0x01,                    // Sector Count = 1
+               lbaL,                    // Sector Number  LBA[7:0]
+               lbaL>>8,                 // Cylinder Low   LBA[15:8]
+               lbaH,                    // Cylinder High  LBA[23:16]
+               0x40|(lbaH>>8)&0x0f,     // Device/Head    LbaMode|LBA[27:24]
+               buf,                     // バッファ
+               256                      // 256ワード = 512バイト
+  );
+}
+
+/*
+ * hddInit :  ハードディスクドライバの初期化ルーチン
+ */
+public void hddInit() {
+  MEM[0xfff7] = addrof(hddIntr);        // 割込みベクタ初期化
+  hddSem = newSem(0);                   // 割込み待ち用のセマフォ
+}

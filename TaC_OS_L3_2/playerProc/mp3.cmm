@@ -1,0 +1,170 @@
+/*
+ * TaC VS1011e Driver
+ */
+
+#include <util.h>
+#include "mp3.h"
+
+#define mp3port1   0x0080
+#define mp3port2   0x0081
+
+// bit masks
+#define mp3_so     0xfffe       // bit0(0x80 WR)
+#define mp3_si     0xfffe       // bit0(0x80 RD)
+#define mp3_dclk   0xfffd       // bit1(0x80 WR)
+#define mp3_sclk   0xfffb       // bit2(0x80 WR)
+#define mp3_xcs    0xfff7       // bit3(0x80 WR)
+#define mp3_bsync  0xffbf       // bit6(0x80 WR) xDCS as New mode SDI
+#define mp3_xreset 0xff7f       // bit7(0x80 WR)
+#define mp3_drq    0xfffd       // bit1(0x80,0x81 port RD)
+#define mp3_inten  0xff7f       // bit7(0x81 port RD/WR)
+#define fullbit    0xffff
+#define portInit   0x00c8       // port 0xc0 initial value to send.
+                                // xRESET,BSYNC,xCS='1',others are set to '0'
+
+#define Volume_val 0x0000       //  0x2020=-16dB, 0x0000=0dB
+
+
+int n, e, f, d;
+char s, portdata;               // portdata : current mp3 port 0x80's data
+
+void delay_cycle(int n)
+{
+    while(n>0) {
+      n = n - 1;
+    }
+}
+
+/*
+ * SPI_WR : one byte output for SPI.
+ *   Assuming xCS or xDCS is '0'
+ * this function can be use both SCI and SDI.
+ */
+void SPI_WR(char spidata) {
+  int q,p = portdata & mp3_so;
+  int v = spidata;
+  for(int i=0; i<8; i=i+1) {
+    q = p | ((v>>7) & 0x0001);
+    out(mp3port1, q);              // set SCKL to '0'
+    out(mp3port1, q | ~mp3_sclk);  // set SCKL to '1'
+    v = v << 1;                    // prepairng next data bit
+  }
+  out(mp3port1, q);                // set SCLK to '0'
+}
+
+/*
+ * SPI_RD : read one word (16bits) from SCI.
+ *  it's asuming xCS is '0'.
+ *  this function work for SCI.
+ *  the VS1011e can't read any data from SDI.
+ */
+/* not used
+int SPI_RD() {
+  int d = 0;
+  int p = portdata;
+  for (int i=0; i<16; i=i+1) {
+    out(mp3port1, p|~mp3_sclk);       // set SCLK to '1'
+    d = (d<<1)|(in(mp3port1)&0x0001); // read SI
+    out(mp3port1, p);                 // set sclk to '0'
+  }
+  return d;
+}
+*/
+
+/*
+ * SCIcomTX : execute SCI WRITE operation
+ */
+void SCIcomTX(char addr, int arg) { // mp3 i/f command Tx
+  portdata = portInit & mp3_xcs;    // xCS to '0'  : 0x00c0
+  out(mp3port1, portdata);          // CS
+  SPI_WR(2);                        // indicate SPI write operation to the BUS.
+  SPI_WR(addr);		            // send a 8bit address to write a word(16b)
+  SPI_WR(arg>>8);                   // send upper 8 bits
+  SPI_WR(arg);                      // send lower 8 bits
+  portdata = portInit;              // set portdata to 0x00c8
+  out(mp3port1, portdata);          // xRESET, xCS = '1', others=>'0'
+}
+
+/*
+ * SCIcomRX : execute SCI READ operation
+ */
+/* not used
+int SCIcomRX(char addr) {           // mp3 i/f status RX
+  int arg;
+  arg = 0;
+  portdata = portInit & mp3_xcs;    // xcs to '0'
+  out(mp3port1, portdata);          // xcs
+  SPI_WR(3);                        // indicate SPI read operation from the BUS.
+  SPI_WR(addr);                     // send a 8 bit address to read a word(16b)
+  arg = SPI_RD();                   // recieve 16 bits ( a word )
+  portdata = portInit;
+  out(mp3port1, portdata);          // xRESET,BSYNC,xCS='1',others=>'0'
+  return arg;
+}
+*/
+
+/*
+ * mp3reset : RESET  VS1011e
+ */
+public void mp3Reset() {            // reset VS1011e and set transfer mode
+			            // to New mode and set volume and some
+                                    // parameter.
+
+  out(mp3port1, mp3_xreset);        //  reset
+  delay_cycle(20);		    // minimum pulse width for xreset=80ns@25MHz
+  portdata = portInit;              // 0x00c8
+  out(mp3port1, portdata);          // xRESET,BSYNC,xCS='1',and others are '0'
+  delay_cycle(30000);               // min 50000 clk cycle @25MHz from xRESET
+  delay_cycle(30000);	            // to active
+  delay_cycle(30000);	            // it takes just 2 milisec. but in case.
+  for (int i=0;(in(mp3port1)&2)==0;i=i+1) { // wait for DRQ='1' or time out
+    if(i > 30000) {
+      printf("\n Time out for DRQ! it should be '1' but zero now.\n");
+      break;
+    }
+  }
+  // mode set to New mode for VS1011e
+  int addr = 0;                     // set to SCI mode register
+  int arg = 0x0800;                 // set SPI to NEW mode.
+  SCIcomTX(addr, arg);              // write to SPI
+  addr = 3;                         // clock adjust reg.
+  arg = 0x30d4;                     // clock compensation value for 25MHz.
+  SCIcomTX(addr, arg);              // write to clock adjust register
+  delay_cycle(30000);
+  delay_cycle(30000);
+  SCIcomTX(11, Volume_val);         // volume set to Volume_val
+  delay_cycle(30000);
+  delay_cycle(30000);
+}
+
+/*
+ * mp3Flush : Flush hardware buffer
+ */
+public void mp3Flush() {
+  portdata = portInit;
+  out(mp3port1, portdata);
+  portdata = portdata & mp3_bsync;      // set BSYNC to '0', alter for xCS.
+  out(mp3port1, portdata);
+  for(int i=0; i<2048; i=i+1)           // preffered dummy data
+    SPI_WR(0);                          //   for SDI data tx.
+  portdata = portInit;
+  out(mp3port1, portdata);
+}
+
+/*
+ * mp3Send : Send data to LSI
+ */
+public void mp3Send(char[] dbuf, int len) {
+  int len2 = len >> 1;                     // byte length => word length
+  for (int i=0; i<len2; i=i+1) {
+    char fdata = dbuf[i];                  // read a word from buffer
+    while((in(mp3port2)&0x0002)==0)        // wait for DRQ
+      ;
+    portdata = portdata & mp3_bsync;       // set BSYNC to '0', alter for xCS.
+    out(mp3port1, portdata);
+    SPI_WR(fdata);                         // data out for upper byte
+    SPI_WR(fdata>>8);                      // (note. IDE byte swap is used)
+    portdata = portInit;
+    out(mp3port1, portdata);
+  }
+}

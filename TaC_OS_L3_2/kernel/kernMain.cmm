@@ -1,0 +1,279 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ *  kernel/kernMain.cmm : TaC-OS 本体
+ *
+ * 2011.05.20           : 新規作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include "kernAsm.h"
+#include "kernMemory.h"
+#include "proc.h"
+#include "kernel.h"
+#include "usrInit.h"
+
+// カーネルデータ
+public PCB curProc    = null;                          // 現在のプロセス
+PCB readyQueue = null;                                 // 実行可能列
+
+/*
+ * カーネル内サブルーチン(割り込み禁止で呼出す)
+ */
+// プロセスキューで p1 の前に p2 を挿入する
+void insProc(PCB p1, PCB p2) {
+  p2.next = p1;
+  p2.prev = p1.prev;
+  p1.prev = p2;
+  p2.prev.next = p2;
+}
+
+// プロセスキューで p を削除する
+void delProc(PCB p) {
+  p.prev.next = p.next;
+  p.next.prev = p.prev;
+}
+
+// プロセススケジューラ：プロセスを優先度順で readyQueue に登録する
+void schProc(PCB proc) {
+  int enice = proc.enice;
+
+  PCB head = readyQueue.next;                          // 実行可能列から
+  while (head.enice<=enice)                            //  優先度がより低い
+    head = head.next;                                  //   プロセスを捜す
+  insProc(head, proc);                                 // 見つけたプロセスの
+}                                                      //  直前に挿入する
+
+// 次のプロセス選択：readyQueue の先頭プロセスを curProc に選ぶ
+// (ディスパッチャ(アセンブリ言語プログラム)から呼ばれる)
+public void selProc() {
+  PCB p = curProc;                                     // 前のプロセスを記録
+  curProc = readyQueue.next;                           // readyQueue先頭が
+                                                       //  次の実行プロセス
+  if (p.magic!=P_MAGIC) {                              // PCB が破壊されていな
+    panic("PID(%d):selProc:stack over flow", p.pid);   //   いか調べる
+  }
+}
+
+// プロセスが走り抜けてしまった場合、システムを終了する(2012.7.27追加)
+void runAway() {
+  panic("PID(%d):run away from procMain",curProc.pid); // エラーを表示して停止
+}
+
+/*
+ * システムコール
+ */
+// プロセスを生成し、実行可能にする(システムコール)
+int pid = 0;                                           // プロセスの通し番号
+public int newProc(int start, int stkSiz, int nice) {
+  int r = setPri(0);                                   // 割り込み禁止
+  if (pid+1 >= PRC_MAX)                                // プロセスが多すぎる
+   panic("%d:newProc(%d,%d,%d):too many Proc",curProc.pid,start,stkSiz,nice);
+
+  // PCB とスタック領域を割り付ける
+  int siz = sizeof(PCB)+stkSiz;                        // 領域の合計サイズ
+  PCB pcb = malloc(siz);                               // 領域を確保
+  int sp = __AtoI(pcb) + siz;                          // スタック底のアドレス
+
+  // プロセス番号を割り振る
+  pcb.pid = pid;                                       // PID を決める
+  pid = pid + 1;                                       // 通し番号を進める
+
+  // コンテキストを初期化する(C-- v1.0.1 に依存している)
+  MEM[sp=sp-1] = addrof(runAway);                      // runAway(2012.7.27追加)
+  MEM[sp=sp-1] = start;                                // スタックに開始アドレス
+  MEM[sp=sp-1] = 0x8000;                               // 割込許可状態のフラグ
+  MEM[sp=sp-1] = 0;                                    // FP の初期値
+  MEM[sp=sp-1] = 0;                                    // G6 の初期値
+  MEM[sp=sp-1] = 0;                                    // G7 の初期値
+  MEM[sp=sp-1] = 0;                                    // G8 の初期値
+  MEM[sp=sp-1] = 0;                                    // G9 の初期値
+  MEM[sp=sp-1] = 0;                                    // G10 の初期値
+  MEM[sp=sp-1] = 0;                                    // G11 の初期値
+  pcb.sp = sp;                                         // SPの初期値を保存
+
+  // PCB を初期化して実行可能にする
+  pcb.stat  = P_RUN;                                   // 実行可能
+  pcb.nice  = nice;                                    // 優先度
+  pcb.enice = nice;                                    // 優先度
+  pcb.magic = P_MAGIC;                                 // マジック番号
+  schProc(pcb);                                        // 実行可能列に登録
+
+  setPri(r);                                           // 割込み状態を復元する
+  return pid - 1;                                      // プロセス番号を返す
+}
+
+/*
+ * セマフォ関係
+ */
+int semID = 0;                                         // セマフォの通し番号
+SEM[] sem = array(SEM_MAX);                            // セマフォの一覧表
+
+// セマフォの作成(システムコール)
+public int newSem(int init) {
+  int r = setPri(0);                                   // 割り込み禁止
+
+  if (semID + 1 >= SEM_MAX)                            // セマフォが多すぎる
+    panic("%d:newSem(%d):too many SEM",curProc.pid);
+
+  SEM s = malloc(sizeof(SEM));                         // セマフォ本体を割付け
+  s.cnt = init;                                        // 初期値で初期化
+  PCB p = malloc(sizeof(PCB));                         // セマフォのプロセス
+  s.queue = p.prev = p.next = p;                       //   キューを番兵で初期化
+
+  sem[semID] = s;                                      // 一覧表に登録する
+  semID = semID + 1;                                   // 通し番号を進める
+
+  setPri(r);                                           // 割込み状態を復元する
+  return semID - 1;                                    // セマフォ番号を返す
+}
+
+// セマフォの P 操作(システムコール)
+public void semP(int sd) {
+  int r = setPri(0);                                   // 割り込み禁止
+  if (sd<0 || semID <=sd)
+    panic("%d:semP(%d):illegal semID", curProc.pid, sd);
+
+  SEM s = sem[sd];
+  if (s.cnt>0) {                                       // カウンタから引けるなら
+    s.cnt = s.cnt - 1;                                 //   カウンタから引く
+  } else {
+    delProc(curProc);                                  // 実行可能列から外し
+    curProc.stat = P_WAIT;                             // 実行不可能に変更する
+    insProc(s.queue, curProc);                         // セマフォの行列に登録
+    dispatch();                                        // プロセス切替え
+  }
+  setPri(r);                                           // 割込み状態を復元する
+}
+
+// ディスパッチを発生しないセマフォの V 操作(システムコール)
+public boolean iSemV(int sd) {
+  int r = setPri(0);                                   // 割り込み禁止
+  if (sd<0 || semID <=sd)
+    panic("%d:iSemV(%d):illegal semID", curProc.pid, sd);
+
+  SEM s = sem[sd];
+  boolean ret = false;
+  if (s.queue.next==s.queue) {                         // 待ちプロセスが無いなら
+    s.cnt = s.cnt + 1;                                 //   カウンタへ足す
+  } else {
+    PCB p = s.queue.next;                              // 待ち行列の先頭procを
+    delProc(p);                                        //  行列から外す
+    p.stat = P_RUN;                                    // 実行可能に変更
+    schProc(p);                                        // 実行可能列に登録
+    ret = true;                                        // 実行可能列に変化あり
+  }
+  setPri(r);                                           // 割込み状態を復元する
+  return ret;                                          // 実行可能列の変化
+}
+
+// セマフォの V 操作(システムコール)
+public void semV(int sd) {
+  int r = setPri(0);                                   // 割り込み禁止
+  if (iSemV(sd))                                       // V 操作し必要なら
+    dispatch();                                        //  プロセスを切替える
+  setPri(r);                                           // 割込み状態を復元する
+}
+
+// プロセスを切替えるチャンスをカーネルに与える(システムコール)
+public void dspProc() {
+  int r = setPri(0);                                   // 割り込み禁止
+  dispatch();                                          // ディスパッチを試す
+  setPri(r);                                           // 割込み状態を復元する
+}
+
+/*
+ * タイマー関係
+ */
+#define TICK  10                                       // 割り込みは 10ms 単位
+int[] tmrSem = array(PRC_MAX);                         // プロセスに専用セマフォ
+int[] tmrCnt = array(PRC_MAX);                         // プロセス毎のカウンタ
+
+// タイマー割込みハンドラ
+interrupt tmrIntr() {
+  out(0x000b, TICK);                                   // タイマ２再初期化
+  boolean disp = false;                                // ディスパッチの必要性
+  for (int i=0; i<PRC_MAX; i=i+1) {
+    if (tmrCnt[i]>0) {                                 // タイマー稼働中なら
+      tmrCnt[i] = tmrCnt[i] - TICK;                    //  残り時間を減らす
+      if (tmrCnt[i]<=0) {                              // 時間が来たら
+        tmrCnt[i] = 0;                                 //  タイマーを停止し
+	disp = iSemV(tmrSem[i]) || disp;               //   プロセスを起こす
+      }
+    }
+  }
+  if (disp)                                            // 実行可能列に変化が
+    dspProc();                                         //  あるならディスパッ
+}                                                      //   チを試みる
+
+// タイマー初期化
+void tmrInit() {
+  MEM[0xfff6] = addrof(tmrIntr);                       // タイマ２ベクタ初期化
+  out(0x0008, 0x0004);                                 // タイマ２割込み許可
+  out(0x000b, TICK);                                   // タイマ２初期化
+  for (int i=0; i<PRC_MAX; i=i+1)                      // プロセスの数だけ
+    tmrSem[i] = newSem(0);                             //  セマフォを作る
+}
+
+// タイマーを起動しブロックする(システムコール)
+public void sleep(int ms) {                            // 指定時間(ms)
+  int r = setPri(0);                                   // 割込み禁止
+  int p = curProc.pid;
+
+  if (ms<0)                                            // 負の時間はまずい
+    panic("%d:sleep(%d):illegal time", p, ms);
+
+  tmrCnt[p] = ms;                                      // タイマーを起動し
+  if (ms>0) semP(tmrSem[p]);                           //  プロセスをブロック
+  setPri(r);
+}
+
+/*
+ * アイドルプロセス
+ */
+void idleProc() {
+  while(true)                                          // 他のプロセスが実行でき
+    ;                                                  //  ないとき無限ループ
+}
+
+// カーネルのメイン
+public void main() {
+  // メモリ管理初期化、これを最初にすること！！
+  memInit();
+
+  //タイマー初期化(sleep システムコールの準備)
+  tmrInit();
+
+  // readyQueue の初期化
+  readyQueue = malloc(sizeof(PCB));                    // readyQueueに番兵登録
+  readyQueue.next = readyQueue.prev  = readyQueue;
+  readyQueue.nice = readyQueue.enice = P_LOW_PRI + 2;  // 通常未使用の低優先度
+  newProc(addrof(idleProc), P_STKSIZ, P_LOW_PRI + 1);  // アイドルプロセス登録
+
+  // システムスタート
+  usrInit();                                           // ユーザプロセスの初期化
+  curProc = readyQueue.next;                           // 実行プロセスを決める
+  startProc();                                         // プロセス実行開始
+}

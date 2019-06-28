@@ -1,0 +1,243 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ * fatFs/blkFile.cmm : ブロック(セクタ単位)で操作する簡単なファイルを提供する
+ *
+ * 2011.05.23           : Boot-- をもとに新規作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include <kernel.h>            // malloc, free を使用するために必要
+
+#include "blkFile.h"
+#include "hdd.h"
+
+//
+// 一時領域：プロセスとして動作するので一時領域はファイル毎に作らなくてよい
+//
+int[] sTmp   = { 0, 0 };
+int[] dTmp   = { 0, 0 };
+
+//----------------------------------------------------------------------------
+// BPB : ファイルシステム基本情報
+//----------------------------------------------------------------------------
+int sctPrClst;                              // 1クラスタのセクタ数
+int[] bpbLba  = { 0, 0 };                   // BPB領域の開始 LBA
+int[] fatLba  = { 0, 0 };                   // FAT領域の開始 LBA
+int[] rootLba = { 0, 0 };                   // ルートディレクトリ開始 LBA
+int[] dataLba = { 0, 0 };                   // データ領域の開始 LBA
+
+/*
+ * MBR を読み込み最初のアクティブな FAT パーティションの bpb を求める
+ */
+void readMBR() {
+  int[] buf = malloc(BLKSIZ);            // １セクタ分のバッファを確保
+  hddRead(0,0,buf);                      // MBR を読み込む
+
+  for (int i=446; i<510; i=i+16) {       // パーティションテーブルについて
+    int active = byte(buf, i);           // アクティブフラグ
+    int fType  = byte(buf, i+4);         // ファイルシステムタイプ
+
+    if ((active&0x80)!=0 && fType==0x06) { // アクティブな FAT16 パーティション
+      Ld32(bpbLba, Word(buf,i+10), Word(buf,i+8)); // パーティションの開始 LBA
+      free(buf);                         // バッファを解放して
+      return;                            // 戻る
+    }
+  }
+  panic("can't find active FAT16 partition!\n"); // 最後まで行くとエラー
+}
+
+/*
+ * BPB から、いくつかの情報を読み取る
+ */
+void readBPB() {
+  int[] buf = malloc(BLKSIZ);            // １セクタ分のバッファを確保
+  hddRead(bpbLba[0], bpbLba[1], buf);    // BPB を読み込む
+
+  if (Word(buf,11) != 512)               // セクタ長は 512 バイトだけサポート
+    panic("Bytes / Sector != 512 ... not supported!\n");
+
+  sctPrClst = byte(buf, 13);             // クラスタあたりのセクタ数
+
+  // FAT 開始位置(セクタ)の計算
+  Ld32(fatLba, 0, Word(buf,14));          // fat <= 予約セクタ数
+  _add32(fatLba, bpbLba);                 // fat <= fat + bpb
+
+  // ルートディレクトリ位置(セクタ)の計算
+  int numSct = Word(buf,22);             // numSct <= FATあたりセクタ数
+  if (numSct == 0)                       // numSct==0 は FAT32
+    panic("FAT32? ... not supported!\n");
+
+  Ld32(rootLba, 0, byte(buf,16));        // root <= FAT数
+  _add32(_mul32(rootLba,numSct),fatLba); // root <= root * numSct + fat
+  
+  // データの開始位置(セクタ)の計算
+  Ld32(dataLba, 0, Word(buf, 17) / 16);  // data <= ルートディレクトリサイズ
+  _add32(dataLba, rootLba);              // data <= data + root
+
+  // 総クラスタ数をチェックする
+  /*
+  int totalSct = Word(buf, 19);          // 総セクタ数の格納方法は２種類
+  if (totalSct != 0)
+    Ld32(dTmp, 0, totalSct);
+  else
+    Ld32(dTmp, Word(buf, 34), Word(buf, 32));
+
+  _div32(dTmp, sctPrClst);                 // クラスタ数に変換
+  if (dTmp[0]<0x1000)
+    panic("FAT12? ... not supported!\n");
+  */
+  free(buf);                              // バッファを解放
+}
+
+/*
+ * ファイルシステムの基本情報を読み込む
+ */
+public void readMeta() {
+  readMBR();
+  readBPB();
+}
+
+//----------------------------------------------------------------------------
+// FAT : FAT を読んで、次のクラスタを求める機能を提供する
+//----------------------------------------------------------------------------
+int[] fatCch = array(BLKSIZ);               // FAT のキャッシュ領域
+int   fSct   = -1;                          // キャッシュしているFATセクタ
+
+/*
+ * nextClst : FAT をたぐり、次のクラスタ番号を決める
+ * 返り値  新しい クラスタ番号
+ * 引数    clst : 現在のクラスタ番号
+ */
+int nextClst(int clst) {
+  int s = (clst >> 8) & 0xff;               // FAT内セクタの番号
+  if (fSct != s) {                          // キャッシュにあるものと違う
+    Ld32(dTmp, 0, s);                       // セクタ番号を 32bit にする
+    _add32(dTmp, fatLba);                   // FATの開始アドレスを足す
+    hddRead(dTmp[0], dTmp[1], fatCch);      // FATセクタを読む
+    fSct = s;
+  }
+  int offs = clst & 0xff;                   // キャッシュ内オフセット
+  clst = fatCch[offs];                      // FATから次のクラスタ番号を求める
+  
+  return clst;
+}
+
+//----------------------------------------------------------------------------
+// BLKFILE : ブロック(クラスタ)単位で管理されるファイル
+//----------------------------------------------------------------------------
+struct BLKFILE {
+  int     clst;                   // 現在のクラスタ
+  int     sct;                    // 現在のセクタ(クラスタ内番号)
+};
+
+BLKFILE[] files = array(FILEMAX);
+
+/*
+ *  ファイル番号から BLKFILE オブジェクトに変換する
+ */
+BLKFILE fdToBlkFile(int fd) {
+  if (fd < 0 || FILEMAX <= fd) return null;   // エラー
+  BLKFILE f = files[fd];
+  return f;
+}
+
+/*
+ * openBlkFile : BLKFILE オブジェクトを新しく作る
+ * 返り値  ファイル番号
+ * 引数   clst : ファイルの先頭クラスタ番号(0ルートディレクトリの意味)
+ */
+public int openBlkFile(int clst) {
+  int fd;
+  for (fd=0; fd<FILEMAX; fd=fd+1)           // 空きエントリーを探す
+    if (files[fd]==null) break;
+
+  if (fd<FILEMAX) {                         // 空きがあった
+    BLKFILE f   = malloc(sizeof(BLKFILE));
+    f.clst    = clst;
+    f.sct     = 0;
+    files[fd] = f;
+  } else {                                  // 空きがなかった
+    panic("too many open file");
+  }
+  return fd;
+}
+
+/*
+ * closeBlkFile : BLKFILE オブジェクトを破棄する
+ * 返り値  0=正常、-1=エラー
+ * 引き数  fd : ファイル番号
+ */
+public int closeBlkFile(int fd) {
+  BLKFILE f = fdToBlkFile(fd);
+  if (f == null) return -1;                 // エラー
+  free(f);
+  files[fd] = null;
+  return 0;                                 // 正常終了
+}
+
+/*
+ * readBlk : ファイルから１セクタ読み出す
+ * 返り値  読み出したセクタ数(1=正常、0=EOF、-1=エラー)
+ * 引き数  fd   : オープン済みのファイル
+ *         buf  : データを読み出すバッファ(256ワード長)
+ */
+public int readBlk(int fd, char[] buf) {
+  BLKFILE f = fdToBlkFile(fd);
+  if (f == null) return -1;                 // エラー
+
+  int clst = f.clst;
+  if (__ucmp(0xfff6,clst)<=0) return 0;     // EOF になっている
+
+  if (clst==0) {                            // ルートディレクトリ
+    Ld32(dTmp, rootLba[0], rootLba[1]);     //   ルートディレクトリの先頭
+    Ld32(sTmp, 0, f.sct);                   //   ルートディレクトリ内
+    _add32(dTmp, sTmp);                     //     セクタ番号を足す
+    if (dTmp[0]==dataLba[0] &&              //   ルートディレクトリの最後に
+        dTmp[1]==dataLba[1]) return 0;      //     達しているので EOF
+  } else {                                  // ルートディレクトリ以外
+    Ld32(dTmp, 0, clst-2);                  //   現在のクラスタ番号を
+    _mul32(dTmp, sctPrClst);                //     セクタ番号に変換し
+    _add32(dTmp, dataLba);                  //       データ領域開始位置を足す
+    Ld32(sTmp, 0, f.sct);                   // クラスタ内
+    _add32(dTmp, sTmp);                     //     セクタ番号を足す
+  }
+  hddRead(dTmp[0], dTmp[1], buf);           // セクタを読む 
+
+  f.sct = f.sct + 1;                        // セクタを進める
+  if (clst!=0 && f.sct >= sctPrClst) {      // クラスタの最後まで来たら
+    f.clst = nextClst(clst);                //   クラスタを進める
+    f.sct = 0;                              // セクタ番号はリセット
+  }
+  return 1;                                 // 正常に１セクタ読めた
+}
+
+/*
+ * blkInit : 簡単なファイルシステムを初期化する
+ * (割込みが利用可能になる前に実行すること！！)
+ */
+public void blkInit() {
+  hddInit();                 // ドライバの初期化
+}

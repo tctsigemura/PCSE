@@ -1,0 +1,17 @@
+# プリプロセッサ
+#CPP=llvm-cpp-4.2 -std=c99
+CPP=cpp -std=c99
+
+.SUFFIXES: .o .cmm .s
+.s.o:
+	as-- $*.s
+
+.cmm.s:
+	${CPP} -std=c99 -I../kernel -I../util -I../vgaWin -I../fatFs $*.cmm | \
+        c-- > $*.s
+
+mod.o : ${OBJS}
+	ld-- mod.o ${OBJS} > mod.sym
+
+clean :
+	rm -f mod.o *.o *.lst *.sym *~

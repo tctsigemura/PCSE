@@ -1,0 +1,139 @@
+/*
+ * TaC-OS Source Code
+ *    Tokuyama kousen Advanced educational Computer.
+ *
+ * Copyright (C) 2011 - 2013 by
+ *                      Dept. of Computer Science and Electronic Engineering,
+ *                      Tokuyama College of Technology, JAPAN
+ *
+ *   上記著作権者は，Free Software Foundation によって公開されている GNU 一般公
+ * 衆利用許諾契約書バージョン２に記述されている条件を満たす場合に限り，本ソース
+ * コード(本ソースコードを改変したものを含む．以下同様)を使用・複製・改変・再配
+ * 布することを無償で許諾する．
+ *
+ *   本ソースコードは＊全くの無保証＊で提供されるものである。上記著作権者および
+ * 関連機関・個人は本ソースコードに関して，その適用可能性も含めて，いかなる保証
+ * も行わない．また，本ソースコードの利用により直接的または間接的に生じたいかな
+ * る損害に関しても，その責任を負わない．
+ *
+ *
+ */
+
+/*
+ * playerProc/player.cmm : MP3 プレーヤ本体
+ *
+ * 2013.05.21           : setCommand,setFileName,execute を start,stop に変更
+ *                        mp3Init の代わりに mp3Reset を呼び出すように変更
+ * 2011.07.01           : 新規作成
+ *
+ * $Id$
+ *
+ */
+
+#include <util.h>
+#include <kernel.h>           // セマフォを使用するために必要
+#include <fatFs.h>            // ファイルアクセスに必要
+
+#include "mp3.h"
+#include "playerProc.h"
+
+//---------------------------------------------------------------------------
+// データ転送プロセスクラス
+//---------------------------------------------------------------------------
+// fork、join 用セマフォ
+int s1;
+int s2;
+
+// ファイルディスクリプタ
+#define CLOSED (-1)
+int fd = CLOSED;
+
+// フラグ
+boolean flag = false;
+
+// プロセスの初期化ルーチン
+public void playerInit() {
+  s1 = newSem(0);
+  s2 = newSem(0);
+}
+
+// player と他のクラスが同期する
+void join() {
+  semV(s1);
+  semP(s2);
+}
+
+void fork() {
+  semV(s1);
+  semP(s2);
+}
+
+// プロセスのメインルーチン
+char[] buf = array(256);                // データバッファ
+public void playerMain() {
+  int len = 0;
+  mp3Reset();                           // デコーダ LSI をリセット
+  for (;;) {
+    if (fd==CLOSED || len==0 || flag) { // len==0 は EOF
+       do {
+          mp3Flush();                   // 何故だかバッファサイズの２倍の
+          mp3Flush();                   // 空データを送らないとノイズが出る
+
+       	  semV(s2);			// join と同期
+	  semP(s1);
+	  
+	  semV(s2);                     // fork と同期
+	  semP(s1);
+       } while (fd==CLOSED);
+    }
+    len = read(fd, buf, 512);
+    mp3Send(buf,len);
+  }
+}
+
+
+//---------------------------------------------------------------------------
+// MP3 ファイル再生制御クラス
+//---------------------------------------------------------------------------
+#define PLAY 1
+#define STOP 2
+
+int command;
+char[] fileName = array(13);       // fname+'.'+ext+'\0' = max 13 words
+
+void setCommand(int com) { command = com; }
+
+void setFileName(char[] fname) {
+  for (int i=0; i<12; i=i+1) {
+    char c = fileName[i] = fname[i];
+    if (c=='\0') break;
+  }
+}
+
+int execute() {
+  flag = true;
+
+  join();
+  flag = false;
+  if (fd!=CLOSED) close(fd);
+  if (command==PLAY)
+    fd = open(READ, fileName);
+  else // if (command==STOP)
+    fd = CLOSED;
+  fork();
+  
+  int ret = PLAY_OK;
+  if (command==PLAY && fd==CLOSED) PLAY_ERR;
+  return ret;
+}
+
+public int play(char[] fname) {
+  setCommand(PLAY);
+  setFileName(fname);
+  return execute();
+}
+
+public int stop() {
+  setCommand(STOP);
+  return execute();
+}
