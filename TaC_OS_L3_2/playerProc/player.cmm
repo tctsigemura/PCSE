@@ -33,9 +33,12 @@
 #include <util.h>
 #include <kernel.h>           // セマフォを使用するために必要
 #include <fatFs.h>            // ファイルアクセスに必要
+#include <dispR.h>
 
 #include "mp3.h"
 #include "playerProc.h"
+
+#include "../ctrlProc/ctrlProc.h"
 
 //---------------------------------------------------------------------------
 // データ転送プロセスクラス
@@ -48,13 +51,37 @@ int s2;
 #define CLOSED (-1)
 int fd = CLOSED;
 
+// ボリューム
+int volume = MAXVOL;
+
 // フラグ
 boolean flag = false;
+boolean vflag = false;
+boolean pflag = false;
+
+
+#define PLAY 1
+#define STOP 2
+#define PAUSE 3
+#define VOLUME 4
+
+
+int abs(int i) {
+  if (i < 0) { return -i; }
+  return i;
+} 
 
 // プロセスの初期化ルーチン
 public void playerInit() {
   s1 = newSem(0);
   s2 = newSem(0);
+  
+  createWinR();
+
+  showMusicName("XXX");
+  showArtistName("XXX");
+  showPlaytime(0, 0);
+  showVolume(abs(volume - MINVOL));
 }
 
 // player と他のクラスが同期する
@@ -76,18 +103,29 @@ public void playerMain() {
   for (;;) {
     if (fd==CLOSED || len==0 || flag) { // len==0 は EOF
        do {
-          mp3Flush();                   // 何故だかバッファサイズの２倍の
-          mp3Flush();                   // 空データを送らないとノイズが出る
+          if (vflag || pflag) {
+            mp3Flush();                   // 何故だかバッファサイズの２倍の
+            mp3Flush();                   // 空データを送らないとノイズが出る
+          }
 
        	  semV(s2);			// join と同期
-	  semP(s1);
+	        semP(s1);
 	  
-	  semV(s2);                     // fork と同期
-	  semP(s1);
-       } while (fd==CLOSED);
+	        semV(s2);     // fork と同期
+	        semP(s1);
+
+       } while (fd==CLOSED || pflag);    // pause中は抜け出さない
     }
+
     len = read(fd, buf, 512);
     mp3Send(buf,len);
+
+    if (vflag) {
+      volSend(volume);
+      vflag = false;
+    }
+
+    if (len==0) detectEOF();            // 曲が終了したことを知らせる
   }
 }
 
@@ -95,45 +133,97 @@ public void playerMain() {
 //---------------------------------------------------------------------------
 // MP3 ファイル再生制御クラス
 //---------------------------------------------------------------------------
-#define PLAY 1
-#define STOP 2
+char[] filepath = array(39);      
+char[] artist = array(13);  
+int time = 0;
+int maxtime = 0;
 
-int command;
-char[] fileName = array(13);       // fname+'.'+ext+'\0' = max 13 words
 
-void setCommand(int com) { command = com; }
-
-void setFileName(char[] fname) {
-  for (int i=0; i<12; i=i+1) {
-    char c = fileName[i] = fname[i];
-    if (c=='\0') break;
-  }
+public void countReset() { 
+  time = 0; 
+  showPlaytime(time, maxtime);
 }
 
-int execute() {
+public void countUp() { 
+  if (fd!=CLOSED && !pflag) time = time + 1;
+  showPlaytime(time, maxtime);
+}
+
+void setFilePath(char[] fname) {
+  strcpy(filepath, fname, '\0');
+}
+
+int execute(int command) {
   flag = true;
 
   join();
+
   flag = false;
-  if (fd!=CLOSED) close(fd);
-  if (command==PLAY)
-    fd = open(READ, fileName);
-  else // if (command==STOP)
-    fd = CLOSED;
-  fork();
   
+  if (command==PLAY) {
+    if (fd!=CLOSED) close(fd);
+    fd = open(READ, filepath);
+    pflag = false;
+    countReset();
+
+    showMusicName(filepath);
+    showArtistName("XXXXX");
+  }
+  else if (command==STOP) {
+    if (fd!=CLOSED) close(fd);
+    fd = CLOSED;
+    pflag = false;
+    countReset();
+  }
+  else if (command==PAUSE) {
+    pflag = !pflag;
+  }
+  else if (command==VOLUME) {
+    vflag = true;
+    showVolume(abs(volume - MINVOL));
+  }
+  
+  fork();
+
   int ret = PLAY_OK;
   if (command==PLAY && fd==CLOSED) PLAY_ERR;
   return ret;
 }
 
+
 public int play(char[] fname) {
-  setCommand(PLAY);
-  setFileName(fname);
-  return execute();
+  setFilePath(fname);
+  return execute(PLAY);
 }
 
 public int stop() {
-  setCommand(STOP);
-  return execute();
+  return execute(STOP);
+}
+
+public int pause() {
+  return execute(PAUSE);
+}
+
+/*
+ *  ボリュームを上げる
+ */
+public int volumeUp() {
+  if ((volume - INTVOL) <= MAXVOL) {
+    volume = MAXVOL;
+  } else {
+    volume = volume - INTVOL;
+  }
+  return execute(VOLUME);
+}
+
+/*
+ *  ボリュームを下げる
+ */
+public int volumeDown() {
+  if ((volume + INTVOL) >= MINVOL) {
+    volume = MINVOL;
+  } else {
+    volume = volume + INTVOL;
+  }
+  return execute(VOLUME);
 }

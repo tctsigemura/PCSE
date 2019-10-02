@@ -35,6 +35,8 @@
 #include "kernel.h"
 #include "usrInit.h"
 
+#include "../ctrlProc/ctrlProc.h"
+
 // カーネルデータ
 public PCB curProc    = null;                          // 現在のプロセス
 PCB readyQueue = null;                                 // 実行可能列
@@ -211,8 +213,9 @@ public void dspProc() {
 int[] tmrSem = array(PRC_MAX);                         // プロセスに専用セマフォ
 int[] tmrCnt = array(PRC_MAX);                         // プロセス毎のカウンタ
 
+int tmr = 1000;                                        // 1s (=1000ms)
 // タイマー割込みハンドラ
-interrupt tmrIntr() {
+interrupt tmrIntr2() {
   out(0x000b, TICK);                                   // タイマ２再初期化
   boolean disp = false;                                // ディスパッチの必要性
   for (int i=0; i<PRC_MAX; i=i+1) {
@@ -220,17 +223,43 @@ interrupt tmrIntr() {
       tmrCnt[i] = tmrCnt[i] - TICK;                    //  残り時間を減らす
       if (tmrCnt[i]<=0) {                              // 時間が来たら
         tmrCnt[i] = 0;                                 //  タイマーを停止し
-	disp = iSemV(tmrSem[i]) || disp;               //   プロセスを起こす
+	      disp = iSemV(tmrSem[i]) || disp;               //   プロセスを起こす
       }
     }
   }
   if (disp)                                            // 実行可能列に変化が
-    dspProc();                                         //  あるならディスパッ
-}                                                      //   チを試みる
+    dspProc();                                         // あるならディスパッチを試みる
+
+  // 一秒を数える
+  if (tmr<0) {                                         // 1秒たったら
+    tmr = 1000;                                        // タイマに1秒をセット
+    detectSec();                                       // 1秒たったことを知らせる
+  }
+  else {
+    tmr = tmr - TICK;
+  }
+}             
+
+
+/*
+interrupt tmrIntr1() {
+  out(0x000b, TICK);                                   // タイマ1再初期化
+
+  // 一秒を数える
+  if (tmr<0) {                                         // 1秒たったら
+    tmr = 1000;                                        // タイマに1秒をセット
+    detectSec();                                       // 1秒たったことを知らせる
+  }
+  else {
+    tmr = tmr - TICK;
+  }
+}                      
+*/
+
 
 // タイマー初期化
 void tmrInit() {
-  MEM[0xfff6] = addrof(tmrIntr);                       // タイマ２ベクタ初期化
+  MEM[0xfff6] = addrof(tmrIntr2);                       // タイマ２ベクタ初期化
   out(0x0008, 0x0004);                                 // タイマ２割込み許可
   out(0x000b, TICK);                                   // タイマ２初期化
   for (int i=0; i<PRC_MAX; i=i+1)                      // プロセスの数だけ

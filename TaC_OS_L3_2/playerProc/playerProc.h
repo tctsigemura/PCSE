@@ -28,6 +28,9 @@
  * $Id$
  *
  */
+#define MAXVOL 0x0000   // 最大ボリューム
+#define MINVOL 0x007D   // 最小ボリューム (本来は0x00FF)
+#define INTVOL 0x0005   // ボリュームの変化量
 
 public void playerInit();            // プレイヤープロセスの初期化ルーチン
 public void playerMain();            // プレイヤープロセスのメインルーチン
@@ -37,3 +40,8 @@ public void playerMain();            // プレイヤープロセスのメイン�
 
 public int play(char[] fname);
 public int stop();
+public int pause();
+public int volumeUp();
+public int volumeDown();
+public void countReset();
+public void countUp();

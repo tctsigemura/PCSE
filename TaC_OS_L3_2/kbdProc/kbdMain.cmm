@@ -36,6 +36,7 @@
 #include <fatFs.h>            // ファイルアクセスのために必要
 
 #include "../playerProc/playerProc.h"
+#include "../ctrlProc/ctrlProc.h"
 
 #include "kbdProc.h"
 #include "kbd.h"
@@ -170,40 +171,8 @@ char[] tbuf = array(LMAX+1);
 
 public void kbdMain() {
   kbdInit();                         // キーボード初期化
-
-  win = newWin(0,0,25,60);           // ウインドを作って
-  wClear(win);                       // クリア
-
-  for (int y=0; y<25; y=y+1) {       // ウインドの右端に線を引く
-    wMove(win, y, 59);
-    wPrintf(win, "|");
-  }
-
-  wSetProp(win, 0,0,25,59);          // ウインドの大きさ等を変更する
-
-  wPrintf(win, "TaC-OS Modoki Shell\n");
+  
   for (;;) {
-    wPrintf(win, "$ ");              // プロンプトのつもり
-    getLBuf();
-    int p = getStr(lbuf, 0, tbuf);
-    if (strCmp(tbuf, "cat")==0) {
-      getStr(lbuf, p, tbuf);
-      catFile(tbuf);
-    } else if (strCmp(tbuf, "dump")==0) {
-      getStr(lbuf, p, tbuf);
-      dumpFile(tbuf);
-    } else if (strCmp(tbuf, "ls")==0) {
-      getStr(lbuf, p, tbuf);
-      listFile(tbuf);
-    } else if (strCmp(tbuf, "play")==0) {
-      getStr(lbuf, p, tbuf);
-      play(tbuf);
-    } else if (strCmp(tbuf, "stop")==0) {
-      stop();
-    } else if (strCmp(tbuf, "exit")==0) {
-      return;                               // わざとエラー(run away テスト)
-    } else {
-      wPrintf(win, "unknown command!\n");
-    }
+    detectKey(getc());   //　キー入力があったことを報告する
   }
 }

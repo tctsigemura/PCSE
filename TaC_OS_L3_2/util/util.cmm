@@ -150,3 +150,28 @@ public void panic(char[] msg, ...) {
   putch('\n');
   for(;;);                                      // システムを停止する
 }
+
+
+/*
+ * 文字列sを文字列dにコピーする
+ */
+public void strcpy(char[] d, char[] s, char eos) {
+  int i;
+  for (i=0; s[i]!=eos; i=i+1) {
+    d[i] = s[i];
+  } 
+  d[i] = '\0';
+}
+
+/*
+ *  文字列sと文字列dを比較する
+ */
+public int strcmp(char[] d, char[] s) {
+  int i=0;
+  for (; s[i]!='\0'; i=i+1) {
+    if (d[i] == '\0') { return 0; }
+    if (s[i] != d[i]) { return 0; }
+  }
+  if (d[i] != '\0') { return 0; }   // s[END]==d[END]=='\0'でないなら
+  return 1;
+}
