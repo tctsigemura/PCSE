@@ -1,0 +1,81 @@
+#include <util.h>
+#include <vgaWin.h>
+#include <fatFs.h>
+#include <kernel.h>
+
+#include "dispB.h"
+
+#define y0 17
+#define x0 0
+#define ys 8
+#define xs 79
+WIN window;
+
+int[] yi={0,0,ys,ys};
+int[] xi={0,xs,0,xs};
+
+
+public void createWinB(){
+  window = newWin(y0,x0,ys,xs);
+  wClear(window);
+
+  for(int i=0;i<4;i=i+1){
+    wMove(window,yi[i],xi[i]);
+    wPutc(window,'+');
+  }
+  for(int j=1;j<3;j=j+1){
+    for(int i=1;i<xs-1;i=i+1){
+      wMove(window,yi[j]-1,i);
+      wPutc(window,'-');
+    }
+  }
+  for(int i=0;i<2;i=i+1){
+    for(int j=1;j<ys-1;j=j+1){
+      wMove(window,j,xi[i]);
+      wPutc(window,'|');
+    }
+  }
+}
+
+public void showRndMode(boolean rndMode){
+  wMove(window,1,1);
+  char[] msg;
+  if (rndMode) { 
+    msg="RANDOM : ON "; 
+  }
+  else { 
+    msg="RANDOM : OFF"; 
+  }
+  wPuts(window,msg);
+}
+
+public void showLockMode(boolean lockMode){
+  wMove(window,2,1);
+  char[] msg;
+  if (lockMode) { 
+    msg="LOCK   : ON "; 
+  }
+  else { 
+    msg="LOCK   : OFF"; 
+  }
+  wPuts(window,msg);
+}
+
+
+public void showKeybind(char[] fpath){
+  wMove(window,4,1);
+  int fd = open(READ, fpath);
+  if(fd<0){
+    wPrintf(window,"Can't open File:help.txt\n");
+  }
+  else{
+    char[] dbuf=malloc(256);
+    int len;
+    while((len=read(fd,dbuf,512))>0){
+      for(int i=0; i<len; i=i+1)
+        wPrintf(window,"%c",byte(dbuf,i));
+    }
+    free(dbuf);
+  }
+  close(fd);
+}
