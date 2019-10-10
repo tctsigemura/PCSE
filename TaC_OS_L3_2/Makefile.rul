@@ -1,13 +1,14 @@
 # プリプロセッサ
 #CPP=llvm-cpp-4.2 -std=c99
-CPP=cpp -std=c99
+#CPP=cpp -std=c99
+CPP=cpp -xc++
 
 .SUFFIXES: .o .cmm .s
 .s.o:
 	as-- $*.s
 
 .cmm.s:
-	${CPP} -std=c99 -I../kernel -I../util -I../vgaWin -I../fatFs $*.cmm | \
+	${CPP} -I../kernel -I../util -I../vgaWin -I../fatFs  -I../dispB -I../dispL  -I../dispR -I../playerProc $*.cmm | \
         c-- > $*.s
 
 mod.o : ${OBJS}

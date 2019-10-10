@@ -1,0 +1,346 @@
+*** 定数 ***
+
+*** BSSセグメント ***
+0000          	.L1	DS	32
+0000          	_MEM	DS	1
+0000          	.dictsize	DS	1
+
+*** ヘッダ ***
+magic = 0107
+text  = 0121
+data  = 0007
+bss   = 0022
+syms  = 0044
+entry = 0000
+trsize= 0060
+drsize= 0004
+
+*** TEXTセグメント ***
+0000 c0c0     	_getDictLen	PUSH	FP
+0001 0ccd     		LD	FP,SP
+0002 0800 0000		LD	G0,.dictsize
+0004 c4c0     		POP	FP
+0005 d000     		RET
+0006 c0c0     	_getFileName	PUSH	FP
+0007 0ccd     		LD	FP,SP
+0008 0820 0121		LD	G2,.dict
+000a 182c 0002		ADD	G2,2,FP
+000c 0822 0000		LD	G2,0,G2
+000e 0802 0000		LD	G0,0,G2
+0010 c4c0     		POP	FP
+0011 d000     		RET
+0012 c0c0     	_getIsdir	PUSH	FP
+0013 0ccd     		LD	FP,SP
+0014 0820 0121		LD	G2,.dict
+0016 182c 0002		ADD	G2,2,FP
+0018 0822 0000		LD	G2,0,G2
+001a 182f 0001		ADD	G2,#1
+001c 0802 0000		LD	G0,0,G2
+001e c4c0     		POP	FP
+001f d000     		RET
+0020 c0c0     	_newDict	PUSH	FP
+0021 0ccd     		LD	FP,SP
+0022 c060     		PUSH	G6
+0023 c070     		PUSH	G7
+0024 081c 0002		LD	G1,2,FP
+0026 c010     		PUSH	G1
+0027 a000 0000		CALL	_openDir
+0029 18df 0001		ADD	SP,#1
+002b 0c60     		LD	G6,G0
+002c 286f 0000		CMP	G6,#0
+002e 9500 003c		JGE	.L7
+0030 081c 0002		LD	G1,2,FP
+0032 c010     		PUSH	G1
+0033 081f 0109		LD	G1,#.L3
+0035 c010     		PUSH	G1
+0036 a000 0000		CALL	_panic
+0038 18df 0002		ADD	SP,#2
+003a 9f00 00d2		JMP	.L6
+003c          	.L7
+003c 4477     		XOR	G7,G7
+003d          	.L8
+003d 0810 0127		LD	G1,.dir
+003f c010     		PUSH	G1
+0040 c060     		PUSH	G6
+0041 a000 0000		CALL	_readDir
+0043 18df 0002		ADD	SP,#2
+0045 280f 0000		CMP	G0,#0
+0047 9600 00d0		JLE	.L9
+0049 287f 0020		CMP	G7,#32
+004b 9700 004f		JLT	.L10
+004d 9f00 00d0		JMP	.L9
+004f          	.L10
+004f 081f 011c		LD	G1,#.L4
+0051 c010     		PUSH	G1
+0052 0820 0127		LD	G2,.dir
+0054 0812 0000		LD	G1,0,G2
+0056 c010     		PUSH	G1
+0057 a000 0000		CALL	_strcmp
+0059 18df 0002		ADD	SP,#2
+005b 280f 0000		CMP	G0,#0
+005d 9600 0061		JLE	.L11
+005f 9f00 003d		JMP	.L8
+0061          	.L11
+0061 081f 011e		LD	G1,#.L5
+0063 c010     		PUSH	G1
+0064 0820 0127		LD	G2,.dir
+0066 0812 0000		LD	G1,0,G2
+0068 c010     		PUSH	G1
+0069 a000 0000		CALL	_strcmp
+006b 18df 0002		ADD	SP,#2
+006d 280f 0000		CMP	G0,#0
+006f 9600 0073		JLE	.L12
+0071 9f00 003d		JMP	.L8
+0073          	.L12
+0073 081f 0002		LD	G1,#2
+0075 c010     		PUSH	G1
+0076 a000 0000		CALL	_malloc
+0078 18df 0001		ADD	SP,#1
+007a 0820 0121		LD	G2,.dict
+007c 1c27     		ADD	G2,G7
+007d 1002 0000		ST	G0,0,G2
+007f 081f 000d		LD	G1,#13
+0081 c010     		PUSH	G1
+0082 a000 0000		CALL	_malloc
+0084 18df 0001		ADD	SP,#1
+0086 0820 0121		LD	G2,.dict
+0088 1c27     		ADD	G2,G7
+0089 0822 0000		LD	G2,0,G2
+008b 1002 0000		ST	G0,0,G2
+008d 0820 0127		LD	G2,.dir
+008f 182f 0001		ADD	G2,#1
+0091 0822 0000		LD	G2,0,G2
+0093 302f 0010		AND	G2,#16
+0095 0840 0121		LD	G4,.dict
+0097 1c47     		ADD	G4,G7
+0098 0844 0000		LD	G4,0,G4
+009a 184f 0001		ADD	G4,#1
+009c 1024 0000		ST	G2,0,G4
+009e 282f 0000		CMP	G2,#0
+00a0 9800 00b7		JNZ	.L14
+00a2 4411     		XOR	G1,G1
+00a3 c010     		PUSH	G1
+00a4 0820 0127		LD	G2,.dir
+00a6 0812 0000		LD	G1,0,G2
+00a8 c010     		PUSH	G1
+00a9 0820 0121		LD	G2,.dict
+00ab 1c27     		ADD	G2,G7
+00ac 0822 0000		LD	G2,0,G2
+00ae 0812 0000		LD	G1,0,G2
+00b0 c010     		PUSH	G1
+00b1 a000 0000		CALL	_strcpy
+00b3 18df 0003		ADD	SP,#3
+00b5 9f00 00ca		JMP	.L13
+00b7          	.L14
+00b7 4411     		XOR	G1,G1
+00b8 c010     		PUSH	G1
+00b9 0820 0127		LD	G2,.dir
+00bb 0812 0000		LD	G1,0,G2
+00bd c010     		PUSH	G1
+00be 0820 0121		LD	G2,.dict
+00c0 1c27     		ADD	G2,G7
+00c1 0822 0000		LD	G2,0,G2
+00c3 0812 0000		LD	G1,0,G2
+00c5 c010     		PUSH	G1
+00c6 a000 0000		CALL	_strcpy
+00c8 18df 0003		ADD	SP,#3
+00ca          	.L13
+00ca 0c27     		LD	G2,G7
+00cb 182f 0001		ADD	G2,#1
+00cd 0c72     		LD	G7,G2
+00ce 9f00 003d		JMP	.L8
+00d0          	.L9
+00d0 1070 0000		ST	G7,.dictsize
+00d2          	.L6
+00d2 c060     		PUSH	G6
+00d3 a000 0000		CALL	_close
+00d5 18df 0001		ADD	SP,#1
+00d7 c470     		POP	G7
+00d8 c460     		POP	G6
+00d9 c4c0     		POP	FP
+00da d000     		RET
+00db c0c0     	_renewDict	PUSH	FP
+00dc 0ccd     		LD	FP,SP
+00dd c060     		PUSH	G6
+00de 4466     		XOR	G6,G6
+00df          	.L15
+00df 2860 0000		CMP	G6,.dictsize
+00e1 9500 00ff		JGE	.L16
+00e3 0820 0121		LD	G2,.dict
+00e5 1c26     		ADD	G2,G6
+00e6 0822 0000		LD	G2,0,G2
+00e8 0812 0000		LD	G1,0,G2
+00ea c010     		PUSH	G1
+00eb a000 0000		CALL	_free
+00ed 18df 0001		ADD	SP,#1
+00ef 0820 0121		LD	G2,.dict
+00f1 1c26     		ADD	G2,G6
+00f2 0812 0000		LD	G1,0,G2
+00f4 c010     		PUSH	G1
+00f5 a000 0000		CALL	_free
+00f7 18df 0001		ADD	SP,#1
+00f9 0c26     		LD	G2,G6
+00fa 182f 0001		ADD	G2,#1
+00fc 0c62     		LD	G6,G2
+00fd 9f00 00df		JMP	.L15
+00ff          	.L16
+00ff 081c 0002		LD	G1,2,FP
+0101 c010     		PUSH	G1
+0102 a000 0020		CALL	_newDict
+0104 18df 0001		ADD	SP,#1
+0106 c460     		POP	G6
+0107 c4c0     		POP	FP
+0108 d000     		RET
+0109 0063 0061	.L3	STRING	"can't open the %s."
+010b 006e 0027
+010d 0074 0020
+010f 006f 0070
+0111 0065 006e
+0113 0020 0074
+0115 0068 0065
+0117 0020 0025
+0119 0073 002e
+011b 0000
+011c 002e 0000	.L4	STRING	"."
+011e 002e 002e	.L5	STRING	".."
+0120 0000
+
+*** DATAセグメント ***
+0121 0000     	.dict	DC	.L1
+0122 0000     	.L2	DC	0
+0123 0000     		DC	0
+0124 0000     		DC	0
+0125 0000     		DC	0
+0126 0000     		DC	0
+0127 0122     	.dir	DC	.L2
+
+*** 再配置表 ***
+TR領域
+Addr	Name	Type	No.
+0003	.dictsize	BSS	  4
+0009	.dict	DATA	  2
+0015	.dict	DATA	  2
+0028	_openDir	UNDF	 13
+002f	.L7	TEXT	 14
+0034	.L3	TEXT	  9
+0037	_panic	UNDF	 15
+003b	.L6	TEXT	 16
+003e	.dir	DATA	  8
+0042	_readDir	UNDF	 18
+0048	.L9	TEXT	 19
+004c	.L10	TEXT	 20
+004e	.L9	TEXT	 19
+0050	.L4	TEXT	 10
+0053	.dir	DATA	  8
+0058	_strcmp	UNDF	 21
+005e	.L11	TEXT	 22
+0060	.L8	TEXT	 17
+0062	.L5	TEXT	 11
+0065	.dir	DATA	  8
+006a	_strcmp	UNDF	 21
+0070	.L12	TEXT	 23
+0072	.L8	TEXT	 17
+0077	_malloc	UNDF	 24
+007b	.dict	DATA	  2
+0083	_malloc	UNDF	 24
+0087	.dict	DATA	  2
+008e	.dir	DATA	  8
+0096	.dict	DATA	  2
+00a1	.L14	TEXT	 25
+00a5	.dir	DATA	  8
+00aa	.dict	DATA	  2
+00b2	_strcpy	UNDF	 26
+00b6	.L13	TEXT	 27
+00ba	.dir	DATA	  8
+00bf	.dict	DATA	  2
+00c7	_strcpy	UNDF	 26
+00cf	.L8	TEXT	 17
+00d1	.dictsize	BSS	  4
+00d4	_close	UNDF	 28
+00e0	.dictsize	BSS	  4
+00e2	.L16	TEXT	 31
+00e4	.dict	DATA	  2
+00ec	_free	UNDF	 32
+00f0	.dict	DATA	  2
+00f6	_free	UNDF	 32
+00fe	.L15	TEXT	 30
+0103	_newDict	TEXT	 12
+
+DR領域
+Addr	Name	Type	No.
+0000	.L1	BSS	  1
+0006	.L2	DATA	  7
+
+*** 名前表 ***
+No.	Name	Type	Value	Offset
+0	@dict.s	TEXT	0000	0000
+1	.L1	BSS	0020	0008
+2	.dict	DATA	0000	000c
+3	_getDictLen	TEXT	0000	0012
+4	.dictsize	BSS	0001	001e
+5	_getFileName	TEXT	0006	0028
+6	_getIsdir	TEXT	0012	0035
+7	.L2	DATA	0001	003f
+8	.dir	DATA	0006	0043
+9	.L3	TEXT	0109	0048
+10	.L4	TEXT	011c	004c
+11	.L5	TEXT	011e	0050
+12	_newDict	TEXT	0020	0054
+13	_openDir	UNDF	0000	005d
+14	.L7	TEXT	003c	0066
+15	_panic	UNDF	0000	006a
+16	.L6	TEXT	00d2	0071
+17	.L8	TEXT	003d	0075
+18	_readDir	UNDF	0000	0079
+19	.L9	TEXT	00d0	0082
+20	.L10	TEXT	004f	0086
+21	_strcmp	UNDF	0000	008b
+22	.L11	TEXT	0061	0093
+23	.L12	TEXT	0073	0098
+24	_malloc	UNDF	0000	009d
+25	.L14	TEXT	00b7	00a5
+26	_strcpy	UNDF	0000	00aa
+27	.L13	TEXT	00ca	00b2
+28	_close	UNDF	0000	00b7
+29	_renewDict	TEXT	00db	00be
+30	.L15	TEXT	00df	00c9
+31	.L16	TEXT	00ff	00ce
+32	_free	UNDF	0000	00d3
+33	_MEM	BSS	0001	00d9
+
+*** 文字列表 ***
+Offset	String
+0000	@dict.s
+0008	.L1
+000c	.dict
+0012	_getDictLen
+001e	.dictsize
+0028	_getFileName
+0035	_getIsdir
+003f	.L2
+0043	.dir
+0048	.L3
+004c	.L4
+0050	.L5
+0054	_newDict
+005d	_openDir
+0066	.L7
+006a	_panic
+0071	.L6
+0075	.L8
+0079	_readDir
+0082	.L9
+0086	.L10
+008b	_strcmp
+0093	.L11
+0098	.L12
+009d	_malloc
+00a5	.L14
+00aa	_strcpy
+00b2	.L13
+00b7	_close
+00be	_renewDict
+00c9	.L15
+00ce	.L16
+00d3	_free
+00d9	_MEM

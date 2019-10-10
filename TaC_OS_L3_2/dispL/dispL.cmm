@@ -1,0 +1,51 @@
+#include "../appProc/appProc.h"
+
+#include <util.h>
+#include <vgaWin.h>
+#include <fatFs.h>
+
+
+#define y0 0
+#define x0 0
+#define ys 18
+#define xs 35
+WIN window;
+
+int[] yi={0,0,ys,ys};
+int[] xi={0,xs,0,xs};
+
+public void createWinL(){
+  window = newWin(y0,x0,ys,xs);
+  wClear(window);
+
+  for(int i=0;i<4;i=i+1){
+    wMove(window,yi[i],xi[i]);
+    wPutc(window,'+');
+  }
+  for(int j=1;j<3;j=j+1){
+    for(int i=1;i<xs-1;i=i+1){
+      wMove(window,yi[j],i);
+      wPutc(window,'-');
+    }
+  }
+  for(int i=0;i<2;i=i+1){
+    for(int j=1;j<ys-1;j=j+1){
+      wMove(window,j,xi[i]);
+      wPutc(window,'|');
+    }
+  }
+
+  wMove(window,1,7);
+  wPuts(window,"=>");
+}
+
+public void showDisplayer(char[][] dispList){
+  for(int i=0;i<10;i=i+1){
+    wMove(window,i+1,10);
+    
+    if (dispList[i] != null)
+      wPuts(window,dispList[i]);
+    else
+      wPuts(window,"------------");
+  }
+}

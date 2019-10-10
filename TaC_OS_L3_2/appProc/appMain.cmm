@@ -1,0 +1,215 @@
+#include <kernel.h>
+#include <util.h>
+#include <playerProc.h>
+#include <dispB.h>
+#include <dispL.h>
+
+#include "appProc.h"
+#include "dict.h"
+
+//---------------------------------------------------------------------------
+// 制御プロセス
+//---------------------------------------------------------------------------
+
+#define SEC 1 
+#define KEY 2
+#define EOF 3
+int proidx = 0;     // プロセスID
+
+char key;
+
+int sem;
+
+#define MIN 2
+int number = MIN;
+
+char[][] displayer = array(MAX_DISP_SIZE, 39);
+
+boolean rndMode = false;
+boolean lockMode = false;
+
+
+// Linear congruential generators (LCGs)
+#define A 13
+#define B 1
+int seed = 1;
+int rand() { 
+    seed = (seed * A + B) % MAX_DICT_SIZE;      // (13 * X + 1) mod 32 = [0 ~ 31]
+    return seed;
+}
+
+void updateDisplayer() 
+{
+    int maxsize = getDictLen();
+    for (int i=0; i<MAX_DISP_SIZE; i=i+1) 
+    {
+        if (number+i >= maxsize) 
+            displayer[i] = null;
+        else
+            displayer[i] = getFileName(number+i);
+    }
+    showDisplayer(displayer);
+}
+
+
+void skip(int x) 
+{
+    int damy = number + x;
+    int maxsize = getDictLen();
+
+    if (damy >= maxsize) { number = MIN; } 
+    else if (damy <= MIN) { number = MIN; } 
+    else { number = damy; }
+}
+
+
+void next() {
+    skip(1);
+    updateDisplayer();
+}
+
+
+void back() {
+    skip(-1);
+    updateDisplayer();
+}
+
+
+void changeRndMode() {
+    rndMode = !rndMode;
+    showRndMode(rndMode);
+}
+
+
+void changeLockMode() {
+    lockMode = !lockMode;
+    showLockMode(lockMode);
+}
+
+
+void joinPath(char[] path, char[] path1, char[] path2) {
+    int i = 0;
+    for (int j=0; (path[i] = path1[j])!='\0'; j=j+1) i=j+1;
+    path[i] = '/';
+    i = i + 1;
+    for (int j=0; (path[i] = path2[j])!='\0'; j=j+1) i=i+1;
+    path[i] = '\0';
+}
+
+
+public void appInit() {
+    sem = newSem(0);     // 初期値0のセマフォ
+
+    createWinB();
+    createWinL();
+
+    playerInit();
+}
+
+
+char[] dpath = array(39);  // indicate the current directory
+public void appMain() {
+    strcpy(dpath, "PLAYERS", '\0');    // set root-path of playlist
+
+    newDict(dpath);
+    updateDisplayer();
+
+    showRndMode(rndMode);
+    showLockMode(lockMode);
+    showKeybind("help.txt");
+
+    for (;;) {
+        sleep(250);
+
+        char[] spath = malloc(39);  // 再生用のパス
+  
+        semP(sem);                  // 割り込みを待つ　
+
+        if (proidx==KEY) {
+            if (!lockMode) {
+                if (key=='w') {
+                    back();
+                }
+                else if (key=='s') {
+                    next();
+                }
+                else if (key=='q') {
+                    strcpy(dpath, "PLAYERS", '\0'); 
+                    renewDict(dpath);
+                    number = MIN;
+                    updateDisplayer();
+                }
+                else if (key=='p') {
+                    if (getIsdir(number) == 0) {
+                        joinPath(spath, dpath, displayer[0]);
+                        play(spath);
+                    }
+                    else {
+                        joinPath(dpath, dpath, displayer[0]);
+                        renewDict(dpath);
+                        updateDisplayer();
+                    }
+                }
+                else if (key=='o') {
+                    stop();
+                }
+                else if (key=='i') {
+                    pause();
+                }
+                else if (key=='h') {
+                    volumeUp();
+                }
+                else if (key=='j') {
+                    volumeDown();
+                }
+                else if (key=='r') {
+                    changeRndMode();
+                }
+            }
+            if (key=='l') {
+                changeLockMode();
+            }
+        } else if (proidx==EOF) {
+            stop();
+            if (rndMode) {
+                int r = 0;
+                int len = getDictLen();
+                do {
+                    r = rand();
+                } while (r < MIN || len <= r);
+                if (getIsdir(r) == 0) {
+                    joinPath(spath, dpath, getFileName(r));
+                    play(spath);
+                }
+            }
+            else {
+                next();
+                if (getIsdir(number) == 0) {
+                    joinPath(spath, dpath, displayer[0]);
+                    play(spath);
+                }
+            }
+        } 
+        free(spath);
+    }
+}
+
+//---------------------------------------------------------------------------
+// イベント制御クラス
+//---------------------------------------------------------------------------
+
+public void detectSec() {
+    countUp(); 
+}
+
+public void detectKey(char c) {
+    key = c;
+    proidx = KEY;
+    semV(sem);
+}
+
+public void detectEOF() {
+    proidx = EOF;
+    semV(sem);
+}
+

@@ -47,19 +47,19 @@
 // プロセス毎にインクルードする
 #include "../fatFs/fatFs.h"
 #include "../kbdProc/kbdProc.h"
-#include "../lifeProc/lifeProc.h"
+#include "../appProc/appProc.h"
 #include "../playerProc/playerProc.h"
 
 public void usrInit() {
   // ユーザプロセスを作る
   newProc(addrof(kbdMain), P_STKSIZ, 10);        // kbdProc をつくる
-  newProc(addrof(lifeMain), P_STKSIZ, 200);      // lifeProc をつくる
+  newProc(addrof(appMain), P_STKSIZ, 200);       // appProc をつくる
   newProc(addrof(fatFsMain), P_STKSIZ, 20);      // fatFsProc をつくる
   newProc(addrof(playerMain), P_STKSIZ, 20);     // playerProc をつくる
 
   // プロセスの初期化ルーチンを実行する
   kbdProcInit();                                 // kbdProc を初期化する
-  lifeInit();                                    // lifeProc を初期化する
+  appInit();                                     // appProc を初期化する
   fatFsInit();                                   // fatFsProc を初期化する
   playerInit();                                  // playerProc を初期化する
 }

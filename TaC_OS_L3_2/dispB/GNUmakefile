@@ -17,12 +17,12 @@
 # る損害に関しても，その責任を負わない．
 #
 #
-# lifeProc/Makefile : lifeProc の Makefile
+# vgaWin/Makefile : vgaWin の Makefile
 #
 # 2011.05.16         : 初期バージョン
 #
 # $Id$
 #
-OBJS=lifeMain.o
+OBJS=dispB.o
 
 include ../Makefile.rul

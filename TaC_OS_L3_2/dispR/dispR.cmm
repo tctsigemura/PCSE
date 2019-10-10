@@ -1,0 +1,65 @@
+#include <util.h>
+#include <vgaWin.h>
+#include <fatFs.h>
+#include <kernel.h>
+
+#include "dispR.h"
+
+#define y0 0
+#define x0 35
+#define ys 18
+#define xs 44
+WIN window;
+
+int[] yi={0,0,ys,ys};
+int[] xi={0,xs,0,xs};
+
+
+public void showMusicName(char[] musicName){
+  wMove(window,1,1);
+  wPrintf(window,"MUSIC  : ");
+  wPuts(window,musicName);
+}
+
+public void showArtistName(char[] ArtistName){
+  wMove(window,2,1);
+  wPrintf(window,"ARTIST : ");
+  wPuts(window,ArtistName);
+}
+
+public void showPlaytime(int time,int playtime){
+  wMove(window,10,1);
+  wPrintf(window,"TIME   : ");
+  wPrintf(window,"%02d",time/60);
+  wPrintf(window,":%02d",time%60);
+  wPrintf(window," / %02d",playtime/60);
+  wPrintf(window,":%02d",playtime%60);
+}
+
+public void showVolume(int volume){
+  wMove(window,11,1);
+  wPrintf(window,"VOLUME : ");
+  wPrintf(window,"%03d / 125",volume);
+}
+
+public void createWinR(){
+  window = newWin(y0,x0,ys,xs);
+  wClear(window);
+
+  for(int i=0;i<4;i=i+1){
+    wMove(window,yi[i],xi[i]);
+    wPutc(window,'+');
+  }
+  for(int j=1;j<3;j=j+1){
+    for(int i=1;i<xs-1;i=i+1){
+      wMove(window,yi[j],i);
+      wPutc(window,'-');
+    }
+  }
+  for(int i=0;i<2;i=i+1){
+    for(int j=1;j<ys-1;j=j+1){
+      wMove(window,j,xi[i]);
+      wPutc(window,'|');
+    }
+  }
+}

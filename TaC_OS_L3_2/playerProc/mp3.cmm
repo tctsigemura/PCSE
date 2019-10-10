@@ -22,7 +22,7 @@
 #define portInit   0x00c8       // port 0xc0 initial value to send.
                                 // xRESET,BSYNC,xCS='1',others are set to '0'
 
-#define Volume_val 0x0000       //  0x2020=-16dB, 0x0000=0dB
+// #define Volume_val 0x0000       //  0x2020=-16dB, 0x0000=0dB
 
 
 int n, e, f, d;
@@ -132,9 +132,9 @@ public void mp3Reset() {            // reset VS1011e and set transfer mode
   SCIcomTX(addr, arg);              // write to clock adjust register
   delay_cycle(30000);
   delay_cycle(30000);
-  SCIcomTX(11, Volume_val);         // volume set to Volume_val
-  delay_cycle(30000);
-  delay_cycle(30000);
+  //SCIcomTX(11, Volume_val);         // volume set to Volume_val
+  //delay_cycle(30000);
+  //delay_cycle(30000);
 }
 
 /*
@@ -167,4 +167,12 @@ public void mp3Send(char[] dbuf, int len) {
     portdata = portInit;
     out(mp3port1, portdata);
   }
+}
+
+/*
+ * volSend : Send volume data to LSI
+ */
+public void volSend(int volume) {
+  int newVolume = (volume << 8) | volume; // connect channels (right channel(2bit) & left channel(2bit))
+  SCIcomTX(11, newVolume);                // volume set
 }

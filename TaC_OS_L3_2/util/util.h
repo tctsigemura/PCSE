@@ -83,3 +83,6 @@ public int byte(int[] b, int x);
 
 // 主記憶を表す配列(初期値 0(0番地)に初期化される)
 public int[] MEM;
+
+public void strcpy(char[] d, char[] s, char eos);  // eos(end of string)までの文字列をコピーする
+public int strcmp(char[] d, char[] s);             // 文字列を比較する
