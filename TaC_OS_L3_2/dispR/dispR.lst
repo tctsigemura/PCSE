@@ -153,11 +153,11 @@ drsize= 0004
 00d0 0ccd     		LD	FP,SP
 00d1 c060     		PUSH	G6
 00d2 c070     		PUSH	G7
-00d3 081f 0027		LD	G1,#39
+00d3 081f 002c		LD	G1,#44
 00d5 c010     		PUSH	G1
 00d6 081f 0012		LD	G1,#18
 00d8 c010     		PUSH	G1
-00d9 081f 0027		LD	G1,#39
+00d9 081f 0023		LD	G1,#35
 00db c010     		PUSH	G1
 00dc 4411     		XOR	G1,G1
 00dd c010     		PUSH	G1
@@ -201,7 +201,7 @@ drsize= 0004
 0117 9500 0143		JGE	.L15
 0119 087f 0001		LD	G7,#1
 011b          	.L16
-011b 287f 0026		CMP	G7,#38
+011b 287f 002b		CMP	G7,#43
 011d 9500 013d		JGE	.L17
 011f c070     		PUSH	G7
 0120 0820 01c6		LD	G2,.yi
@@ -312,9 +312,9 @@ drsize= 0004
 01c5 0012     		DC	18
 01c6 01c2     	.yi	DC	.L1
 01c7 0000     	.L2	DC	0
-01c8 0027     		DC	39
+01c8 002c     		DC	44
 01c9 0000     		DC	0
-01ca 0027     		DC	39
+01ca 002c     		DC	44
 01cb 01c7     	.xi	DC	.L2
 
 *** 再配置表 ***

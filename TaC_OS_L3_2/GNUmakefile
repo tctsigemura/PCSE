@@ -26,7 +26,7 @@
 MAKEFLAGS=--no-print-directory
 
 # crt0 が含まれる util を最初にすること！！
-SUBDIRS:=util kernel kbdProc fatFs playerProc vgaWin ctrlProc dispB dispL dispR
+SUBDIRS:=util kernel kbdProc fatFs vgaWin dispL playerProc appProc dispR dispB
 
 OBJS=$(foreach dir, $(SUBDIRS),  $(dir)/mod.o )
 

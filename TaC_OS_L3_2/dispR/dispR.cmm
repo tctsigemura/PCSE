@@ -6,9 +6,9 @@
 #include "dispR.h"
 
 #define y0 0
-#define x0 40
+#define x0 35
 #define ys 18
-#define xs 39
+#define xs 44
 WIN window;
 
 int[] yi={0,0,ys,ys};

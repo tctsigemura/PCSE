@@ -1,4 +1,4 @@
-#include "../ctrlProc/ctrlProc.h"
+#include "../appProc/appProc.h"
 
 #include <util.h>
 #include <vgaWin.h>
@@ -8,7 +8,7 @@
 #define y0 0
 #define x0 0
 #define ys 18
-#define xs 40
+#define xs 35
 WIN window;
 
 int[] yi={0,0,ys,ys};

@@ -38,7 +38,7 @@
 #include "mp3.h"
 #include "playerProc.h"
 
-#include "../ctrlProc/ctrlProc.h"
+#include "../appProc/appProc.h"
 
 //---------------------------------------------------------------------------
 // データ転送プロセスクラス
@@ -103,7 +103,7 @@ public void playerMain() {
   for (;;) {
     if (fd==CLOSED || len==0 || flag) { // len==0 は EOF
        do {
-          if (vflag || pflag) {
+          if (vflag || !pflag) {
             mp3Flush();                   // 何故だかバッファサイズの２倍の
             mp3Flush();                   // 空データを送らないとノイズが出る
           }

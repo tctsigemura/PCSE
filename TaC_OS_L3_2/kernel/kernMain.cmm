@@ -35,7 +35,7 @@
 #include "kernel.h"
 #include "usrInit.h"
 
-#include "../ctrlProc/ctrlProc.h"
+#include "../appProc/appProc.h"
 
 // カーネルデータ
 public PCB curProc    = null;                          // 現在のプロセス
@@ -210,6 +210,7 @@ public void dspProc() {
  * タイマー関係
  */
 #define TICK  10                                       // 割り込みは 10ms 単位
+
 int[] tmrSem = array(PRC_MAX);                         // プロセスに専用セマフォ
 int[] tmrCnt = array(PRC_MAX);                         // プロセス毎のカウンタ
 
@@ -240,24 +241,7 @@ interrupt tmrIntr2() {
   }
 }             
 
-
-/*
-interrupt tmrIntr1() {
-  out(0x000b, TICK);                                   // タイマ1再初期化
-
-  // 一秒を数える
-  if (tmr<0) {                                         // 1秒たったら
-    tmr = 1000;                                        // タイマに1秒をセット
-    detectSec();                                       // 1秒たったことを知らせる
-  }
-  else {
-    tmr = tmr - TICK;
-  }
-}                      
-*/
-
-
-// タイマー初期化
+//// タイマー初期化
 void tmrInit() {
   MEM[0xfff6] = addrof(tmrIntr2);                       // タイマ２ベクタ初期化
   out(0x0008, 0x0004);                                 // タイマ２割込み許可
@@ -265,6 +249,7 @@ void tmrInit() {
   for (int i=0; i<PRC_MAX; i=i+1)                      // プロセスの数だけ
     tmrSem[i] = newSem(0);                             //  セマフォを作る
 }
+
 
 // タイマーを起動しブロックする(システムコール)
 public void sleep(int ms) {                            // 指定時間(ms)
